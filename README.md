@@ -33,7 +33,7 @@ Two front ends share one core:
 
 **Claude Code (recommended): from this repo as a plugin marketplace**
 ```
-claude plugin marketplace add raykim87/code_flow
+claude plugin marketplace add sraykim/code_flow
 claude plugin install code-flow@code-flow
 ```
 Then in any session: `/code-flow:code-flow path/to/script.py` (or "map the flow of train.py").

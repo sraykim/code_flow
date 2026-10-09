@@ -1,7 +1,7 @@
 {
   "name": "code-flow",
   "description": "Code Flow: read a Python script as an interactive dataflow map with a plain-English walkthrough",
-  "owner": { "name": "Seung Rae Kim (raykim87)" },
+  "owner": { "name": "Seung Rae Kim (sraykim)" },
   "plugins": [
     {
       "name": "code-flow",
