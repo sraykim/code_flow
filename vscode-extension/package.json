@@ -1,0 +1,118 @@
+{
+  "name": "code-flow",
+  "displayName": "Code Flow",
+  "description": "See a Python script as a map: sections you open into blocks, functions you open into their own flow, branches drawn as forks, with optional explanations from Claude Code.",
+  "version": "0.5.0",
+  "publisher": "rayk",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "python",
+    "dataflow",
+    "pipeline",
+    "visualize",
+    "claude"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeFlow.open",
+        "title": "Code Flow: Visualize Script",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "codeFlow.explain",
+        "title": "Code Flow: Explain Script with Claude Code"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "codeFlow.open",
+          "when": "resourceLangId == python",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "codeFlow.open",
+          "when": "resourceLangId == python",
+          "group": "navigation@90"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "codeFlow.open",
+          "when": "resourceLangId == python",
+          "group": "navigation@90"
+        },
+        {
+          "command": "codeFlow.explain",
+          "when": "resourceLangId == python",
+          "group": "navigation@91"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "codeFlow.open",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "codeFlow.explain",
+          "when": "editorLangId == python"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Code Flow",
+      "properties": {
+        "codeFlow.direction": {
+          "type": "string",
+          "enum": [
+            "horizontal",
+            "vertical"
+          ],
+          "enumDescriptions": [
+            "Left to right",
+            "Top to bottom"
+          ],
+          "default": "horizontal",
+          "description": "Default layout direction for new maps. Each map can be switched in its toolbar, and the choice is remembered per file."
+        },
+        "codeFlow.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python 3 interpreter used to parse scripts. Empty = try python3 / python / py."
+        },
+        "codeFlow.claudePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Claude Code CLI (claude). Empty = find it on PATH and common install locations."
+        },
+        "codeFlow.claudeModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional model for Claude Code (passed as --model). Empty = Claude Code's default."
+        },
+        "codeFlow.autoExplain": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ask Claude Code for summaries automatically when a map is opened."
+        },
+        "codeFlow.timeoutSeconds": {
+          "type": "number",
+          "default": 240,
+          "description": "How long to wait for Claude Code."
+        }
+      }
+    }
+  }
+}

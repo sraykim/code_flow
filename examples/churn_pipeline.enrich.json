@@ -1,0 +1,29 @@
+{
+  "source_hash": "c459c738a429",
+  "summary": "Loads customer records and raw events, turns them into recency/frequency features, trains a gradient-boosting churn model, and writes per-customer churn scores only if the test AUC clears the configured bar.",
+  "nodes": {
+    "n1": {"summary": "File locations and the random seed shared by several steps."},
+    "n2": {"summary": "Name of the target column used when splitting and scoring."},
+    "n3": {"summary": "Reads config.json: customer file, as-of date, test size, model params, AUC bar."},
+    "n4": {"summary": "Reads raw events and caches them to the staging parquet; returns only the row count."},
+    "n5": {"summary": "Loads the customer table named in the config."},
+    "n6": {"summary": "Joins customers with staged events to compute recency and frequency per customer."},
+    "n7": {"summary": "Separates the label and makes a seeded train/test split."},
+    "n8": {"summary": "Fits a GradientBoostingClassifier with the configured parameters."},
+    "n9": {"summary": "Scores the test set and returns ROC AUC."},
+    "n10": {"summary": "Logs the event count and AUC."},
+    "n11": {"summary": "If AUC passes the bar, scores every customer and writes scores.csv."},
+    "h12": {"summary": "Day difference between two date series."},
+    "h13": {"summary": "Debug leftover; never called."}
+  },
+  "stages": [
+    {"name": "Configure", "nodes": ["n1", "n2", "n3"]},
+    {"name": "Load", "nodes": ["n4", "n5"]},
+    {"name": "Features", "nodes": ["n6", "h12"]},
+    {"name": "Model", "nodes": ["n7", "n8", "n9"]},
+    {"name": "Output", "nodes": ["n10", "n11"]}
+  ],
+  "implicit_edges": [
+    {"source": "n4", "target": "n6", "label": "staging.parquet", "reason": "ingest_events writes STAGING_PATH; build_features reads it back. The only link between them is the file, so ingest must run first."}
+  ]
+}

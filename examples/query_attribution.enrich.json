@@ -1,0 +1,252 @@
+{
+  "source_hash": "d74f7350d0a8",
+  "summary": "Command-line step that matches every customer-contact row to one order and writes the result as parquet. With --strategy by_erc, WISMO contacts (ERC 4101/4102) go through a three-check rule over a 30/60-day look-back and everything else uses the legacy as-of join; any other --strategy value runs the as-of join for all contacts. Each output row carries an attrib_strategy label saying which rule picked its order.",
+  "sections": {},
+  "nodes": {
+    "n1": {
+      "summary": "ERC code sets that attribute_by_erc uses to route contacts: {4101, 4102} → WISMO rule, {4301, 4302, 4401, 4403, 4603, 5301, 5302} → Returns branch (currently also as-of)."
+    },
+    "n2": {
+      "summary": "Look-back windows in days: 30 for WISMO Checks 2/3 and the in-bucket fallback, 60 for WISMO Check 1 (code match) and for Returns. They are the CLI defaults, overridable with --wismo-window-days etc.",
+      "watch": "Check 1's window must be ≥ the main window; _attribute_wismo raises otherwise."
+    },
+    "n3": {
+      "summary": "The eight attrib_strategy labels written to the output: six WISMO primary/fallback labels (Check 1 code match, Check 2 GNR/DOR last delivered, Check 3 oldest in flight), plus asof_fallback and no_match."
+    },
+    "n4": {
+      "summary": "Intention labels ('Marked delivered but not received', 'Gift card not received') that send a WISMO contact without a diary code to Check 2; overridable with --gnr-dor-intentions."
+    },
+    "n5": {
+      "summary": "Defines and parses the CLI: --contacts/--orders parquet paths, the two date columns, --by group keys, --strategy (backward/forward/nearest/by_erc) and the by_erc-only options (ERC column, delivery date, windows, diary/intention/adj-code columns)."
+    },
+    "n6": {
+      "summary": "Reads both parquet files into Polars frames and prints their row counts."
+    },
+    "b7": {
+      "summary": "Picks the attribution rule: --strategy by_erc runs the ERC-aware dispatcher (needs --delivery-date, else the parser errors out); any other value runs the legacy as-of join with that strategy."
+    },
+    "n8": {
+      "summary": "Fails fast if --delivery-date is missing, then takes the GNR/DOR intention set from --gnr-dor-intentions or the default."
+    },
+    "n9": {
+      "summary": "Routes contacts by ERC: WISMO through the three-check rule, Returns and others through the as-of join; returns contacts × order columns plus attrib_strategy, then prints the strategy distribution."
+    },
+    "n10": {
+      "summary": "Prints how many contacts landed in each attrib_strategy."
+    },
+    "n11": {
+      "summary": "Legacy path: as-of join of every contact to its latest prior order (or forward/nearest if asked) within the --by groups; no attrib_strategy column is added here.",
+      "watch": "Output schema differs from the by_erc path: no attrib_strategy column."
+    },
+    "n12": {
+      "summary": "Counts contacts whose order_date is non-null after the join and prints the matched share."
+    },
+    "n13": {
+      "summary": "Creates the output folder and writes the attributed frame to --out as parquet."
+    },
+    "h14": {
+      "summary": "WISMO three-check rule used by attribute_by_erc; open its flow to see the checks. Returns one order per contact (or nulls) with attrib_strategy set per check."
+    },
+    "attribute_contacts_to_orders/n1": {
+      "summary": "Rejects any strategy other than backward/forward/nearest with a ValueError."
+    },
+    "attribute_contacts_to_orders/n2": {
+      "summary": "Asserts both date columns exist in their frames; a missing column is a bug upstream, not data."
+    },
+    "attribute_contacts_to_orders/n3": {
+      "summary": "Counts null contact dates and null order dates and prints both rates."
+    },
+    "attribute_contacts_to_orders/n4": {
+      "summary": "If either side has null dates: with drop_null_dates=True (default) the null-date rows are filtered out of both frames and the new sizes printed; with False it raises ValueError.",
+      "watch": "Dropped contacts disappear from the output entirely, they are not returned with null order columns."
+    },
+    "attribute_contacts_to_orders/n5": {
+      "summary": "Sorts contacts and orders by (by_cols + their date column); Polars join_asof requires sorted keys."
+    },
+    "attribute_contacts_to_orders/n6": {
+      "summary": "join_asof contacts ← orders on contact_date vs order_date within by_cols: 'backward' picks the latest order with order_date ≤ contact_date; contacts with no such order get null order columns."
+    },
+    "_attribute_wismo/n1": {
+      "summary": "Guard: code_match_window_days must be ≥ window_days, otherwise ValueError (Check 1 may only widen the look-back)."
+    },
+    "_attribute_wismo/n2": {
+      "summary": "Flags which optional columns are actually present: diary code and intention on contacts, adj-code list on orders. Missing columns switch the matching checks off."
+    },
+    "_attribute_wismo/n3": {
+      "summary": "Gives every contact a row index (_contact_idx) and inner-joins contacts to orders on by_cols, producing all contact × order candidate pairs."
+    },
+    "_attribute_wismo/n4": {
+      "summary": "Keeps pairs whose order_date is within [contact_date − code_match_window_days, contact_date] (the wider window) and flags _in_window_main for the narrower window_days window used by Checks 2/3 and fallbacks."
+    },
+    "_attribute_wismo/n5": {
+      "summary": "Early exit when no contact has any order in the wide window: returns the contacts with null order columns and null attrib_strategy so the caller falls them back to as-of."
+    },
+    "_attribute_wismo/n6": {
+      "summary": "Per pair: _in_flight = delivery null or after the contact; _delivered_before = delivered strictly before the contact."
+    },
+    "_attribute_wismo/n7": {
+      "summary": "Builds _adj_codes_norm: the order's adj-code list with CHAR padding stripped, or a null list column when the orders have no adj-code column."
+    },
+    "_attribute_wismo/n8": {
+      "summary": "_adj_matches = the contact's diary code appears in the order's normalised adj-code list; always False unless both columns exist."
+    },
+    "_attribute_wismo/n9": {
+      "summary": "Starts the bucket expression: 'A' when the contact has a diary code (only if that column exists)."
+    },
+    "_attribute_wismo/n10": {
+      "summary": "Adds bucket 'B' for contacts whose intention is in gnr_dor_intentions (only if the intention column exists)."
+    },
+    "_attribute_wismo/n11": {
+      "summary": "Everything else becomes bucket 'C'; with neither column present every contact is C, which reproduces the old oldest-in-flight rule."
+    },
+    "_attribute_wismo/n12": {
+      "summary": "Scores each pair: tier 0 = primary (A: adj code matches, wide window; B: delivered before contact; C: in flight — B/C need the narrow window), tier 1 = any order in the narrow window, 99 = dropped. Tiebreak: C-primary prefers the OLDEST order, B-primary the latest delivery, all others the latest order."
+    },
+    "_attribute_wismo/n13": {
+      "summary": "Sorts by (_contact_idx, tier, tiebreak score, then ORDER_SERIAL_NUMBER if present) and keeps the first pair per contact: the winning order."
+    },
+    "_attribute_wismo/n14": {
+      "summary": "Maps (bucket, tier) to the public label: wismo_code_match / _fb_latest, wismo_gnr_dor_last_delivered / _fb_latest, wismo_in_flight_oldest / _fb_latest; drops the temporary columns."
+    },
+    "_attribute_wismo/n15": {
+      "summary": "Left-joins the picks back onto all contacts, so contacts with no in-window order keep null order columns and null attrib_strategy, then drops _contact_idx."
+    },
+    "attribute_by_erc/n1": {
+      "summary": "Asserts the contact date, order date, delivery date and ERC columns exist in their frames."
+    },
+    "attribute_by_erc/n2": {
+      "summary": "Raises TypeError if the order or delivery date column is still a String; callers must parse dates upstream so sorting is chronological."
+    },
+    "attribute_by_erc/n3": {
+      "summary": "Prints the null rate of the three date columns. Null delivery dates are kept: they mean 'not delivered yet'."
+    },
+    "attribute_by_erc/n4": {
+      "summary": "Builds the two routing predicates from WISMO_ERCS and RETURNS_ERCS over the ERC column."
+    },
+    "attribute_by_erc/n5": {
+      "summary": "Splits contacts into wismo_contacts, returns_contacts and other_contacts; a null ERC lands in 'other'."
+    },
+    "attribute_by_erc/n6": {
+      "summary": "Prints the three group sizes."
+    },
+    "attribute_by_erc/n7": {
+      "summary": "Accumulator for the per-branch results, concatenated at the end."
+    },
+    "attribute_by_erc/b8": {
+      "summary": "WISMO branch runs only when there are WISMO contacts."
+    },
+    "attribute_by_erc/n9": {
+      "summary": "Runs the three-check rule on the WISMO contacts with the configured windows and optional diary/intention/adj-code columns; result has attrib_strategy set where a candidate was found, null otherwise."
+    },
+    "attribute_by_erc/n10": {
+      "summary": "Splits the WISMO result into hits (attrib_strategy set) and misses (null), prints the counts and the strategy mix, and appends the hits to parts."
+    },
+    "attribute_by_erc/b11": {
+      "summary": "Only when some WISMO contacts had no order in the window."
+    },
+    "attribute_by_erc/n12": {
+      "summary": "Strips the (all-null) order columns and attrib_strategy from the misses so they can be re-attributed cleanly."
+    },
+    "attribute_by_erc/n13": {
+      "summary": "As-of join for the WISMO misses against the same orders pool (latest order on or before the contact date)."
+    },
+    "attribute_by_erc/n14": {
+      "summary": "Labels those rows asof_fallback when an order was found, no_match otherwise, and appends them to parts."
+    },
+    "attribute_by_erc/n15": {
+      "summary": "Returns branch placeholder: return_indicator_col and returns_window_days are accepted but unused."
+    },
+    "attribute_by_erc/b16": {
+      "summary": "Returns branch runs only when there are Returns contacts."
+    },
+    "attribute_by_erc/n17": {
+      "summary": "Returns contacts: plain as-of join (the dedicated Returns rule is not implemented yet)."
+    },
+    "attribute_by_erc/n18": {
+      "summary": "Labels Returns rows asof_fallback / no_match and appends them to parts."
+    },
+    "attribute_by_erc/b19": {
+      "summary": "Other/unknown ERCs run only when present."
+    },
+    "attribute_by_erc/n20": {
+      "summary": "Other contacts: plain as-of join."
+    },
+    "attribute_by_erc/n21": {
+      "summary": "Labels Other rows asof_fallback / no_match and appends them to parts."
+    },
+    "attribute_by_erc/b22": {
+      "summary": "Guards the empty-input case: with no contacts at all, parts is empty."
+    },
+    "attribute_by_erc/n23": {
+      "summary": "Builds an empty frame with the right columns by running the as-of join on the empty contacts and adding a null attrib_strategy, and returns it."
+    },
+    "attribute_by_erc/n24": {
+      "summary": "Concatenates the branch results with how='diagonal_relaxed' so slightly different schemas (nulls vs typed columns) still stack; this is the function's result."
+    }
+  },
+  "stages": [
+    {
+      "name": "Settings",
+      "summary": "ERC code sets, windows, strategy labels and intention defaults.",
+      "nodes": [
+        "n1",
+        "n2",
+        "n3",
+        "n4"
+      ],
+      "narrative": "Before anything runs, the module fixes the vocabulary the rules use. WISMO_ERCS and RETURNS_ERCS decide which contacts take which route; the three *_WINDOW_DAYS_DEFAULT values set how far back the WISMO checks look (30 days for most checks, 60 for the code-match check and for Returns); the STRAT_* strings are the labels that end up in attrib_strategy; and GNR_DOR_INTENTIONS_DEFAULT names the intentions that send a contact to the 'last delivered' check. Everything else in the file reads from these."
+    },
+    {
+      "name": "CLI & load",
+      "summary": "Parse arguments and read both parquet files.",
+      "nodes": [
+        "n5",
+        "n6"
+      ],
+      "narrative": "main() first builds the argument parser: the two parquet paths, the two date columns, the --by keys and --strategy are required, and a second group of options only matters for --strategy by_erc. It then reads both parquet files into Polars frames as contacts and orders and prints their sizes, which is the last point where the two paths share code."
+    },
+    {
+      "name": "Attribute",
+      "summary": "Choose the rule and match contacts to orders.",
+      "nodes": [
+        "b7",
+        "n8",
+        "n9",
+        "n10",
+        "n11",
+        "h14"
+      ],
+      "narrative": "The strategy flag is the fork. With by_erc, main() checks that --delivery-date was given, resolves the GNR/DOR intention set, and hands contacts and orders to attribute_by_erc, which routes each contact by ERC and returns every row with an attrib_strategy label; the label mix is printed. With any other strategy, attribute_contacts_to_orders does a single as-of join for all contacts and no label column is added. Both paths leave the result in out."
+    },
+    {
+      "name": "Write",
+      "summary": "Report the matched share and write the parquet.",
+      "nodes": [
+        "n12",
+        "n13"
+      ],
+      "narrative": "Finally main() counts how many rows of out have a non-null order date, prints that as the matched share, creates the output folder and writes out to --out as parquet."
+    }
+  ],
+  "implicit_edges": [],
+  "inputs": [
+    "--contacts parquet: one row per customer contact, with the contact date, ERC and (optionally) diary code / intention columns",
+    "--orders parquet: one row per order, with order date, delivery date and (optionally) a list of adjustment codes",
+    "CLI options: date column names, --by group keys, --strategy, windows and the by_erc column names"
+  ],
+  "outputs": [
+    "--out parquet: every contact row joined to the order it was attributed to (null order columns when none), plus attrib_strategy on the by_erc path",
+    "Console: row counts, null-rate checks, group sizes, strategy mix and the matched share"
+  ],
+  "functions": {
+    "attribute_contacts_to_orders": {
+      "narrative": "The function validates the strategy, asserts both date columns exist, then measures and prints how many contact dates and order dates are null. If there are any, it either drops those rows from both frames (the default) or raises, because join_asof cannot handle null keys. With clean inputs it sorts contacts and orders by the group keys plus their date column and runs join_asof: each contact gets the latest order whose order_date is on or before its contact_date within the same group, or null order columns if there is none."
+    },
+    "_attribute_wismo": {
+      "narrative": "After checking that the code-match window is not narrower than the main window, the function works out which optional columns are present, gives each contact an index and joins it to every order in the same group. It keeps only pairs within the wide window and flags which are also within the narrow one; if nothing survives it returns the contacts with null order columns. Each pair is then annotated: is the order in flight, was it delivered before the contact, does its adjustment-code list contain the contact's diary code. Contacts are put in bucket A (has diary code), B (GNR/DOR intention) or C (everything else), and each pair gets a tier, 0 for the bucket's primary check and 1 for the in-window fallback, plus a tiebreak score that prefers the oldest order for C, the latest delivery for B and the latest order otherwise. Sorting by contact, tier and score and taking the first row per contact picks the winner; the (bucket, tier) pair becomes the attrib_strategy label, and a left join back onto all contacts keeps the ones that found nothing."
+    },
+    "attribute_by_erc": {
+      "narrative": "The function starts with checks: the four named columns must exist and the two date columns must already be parsed, not strings. It prints null rates, then splits contacts three ways by ERC: WISMO, Returns and everything else (including null ERC). WISMO contacts go through _attribute_wismo; those that came back with a strategy are kept, and the rest are stripped of their empty order columns and re-attributed with the plain as-of join, labelled asof_fallback or no_match. Returns and Other contacts each get the as-of join directly with the same labels. The pieces accumulate in parts and are concatenated with a relaxed schema union; if there were no contacts at all, an empty frame of the right shape is returned instead."
+    }
+  }
+}
