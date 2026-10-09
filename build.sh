@@ -9,5 +9,5 @@ cp core/explain_prompt.md $SK/reference/
 cp core/viewer.html core/explain_prompt.md vscode-extension/media/
 cp core/codeflow_parse.py vscode-extension/python/
 (cd $SK/.. && rm -f ../../../dist/code-flow-skill.zip && zip -qr ../../../dist/code-flow-skill.zip code-flow -x '*/__pycache__/*')
-(cd vscode-extension && npx --yes @vscode/vsce package --allow-missing-repository --out ../dist/code-flow-0.5.1.vsix)
+(cd vscode-extension && npx --yes @vscode/vsce package --allow-missing-repository --out ../dist/code-flow-0.6.0.vsix)
 echo "built: dist/"

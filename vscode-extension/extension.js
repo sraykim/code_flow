@@ -20,9 +20,17 @@ function activate(context) {
       await openFlow(context, vscode.Uri.file(file));
       explain(context, file);
     }),
+    vscode.commands.registerCommand("codeFlow.chat", async (uri) => {
+      const file = resolveFile(uri);
+      if (!file) return;
+      await openFlow(context, vscode.Uri.file(file));
+      post(panels.get(file), { type: "chatOpen" });
+    }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (panels.has(doc.uri.fsPath)) refresh(context, doc.uri.fsPath);
-    })
+    }),
+    vscode.debug.registerDebugAdapterTrackerFactory("*", { createDebugAdapterTracker: (session) => debugTracker(session) }),
+    vscode.debug.onDidTerminateDebugSession(() => { for (const st of panels.values()) if (st.debugging) { st.debugging = false; post(st, { type: "debug", event: "ended" }); } })
   );
 }
 
@@ -54,9 +62,9 @@ async function openFlow(context, uri) {
     { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [] }
   );
   panel.iconPath = new vscode.ThemeIcon("type-hierarchy");
-  const st = { panel, file, graph: null, busy: false };
+  const st = { panel, file, graph: null, busy: false, chat: null, debugging: false, traceBps: [] };
   panels.set(file, st);
-  panel.onDidDispose(() => panels.delete(file));
+  panel.onDidDispose(() => { clearTrace(st); if (st.chat && st.chat.child) st.chat.child.kill(); panels.delete(file); });
   panel.webview.onDidReceiveMessage((m) => onMessage(context, st, m));
 
   let graph;
@@ -129,6 +137,10 @@ async function onMessage(context, st, m) {
   if (m.type === "reveal") reveal(st.file, m.line, m.end);
   else if (m.type === "positions") context.workspaceState.update("pos:" + st.file, m.positions);
   else if (m.type === "explain") explain(context, st.file);
+  else if (m.type === "chat") chat(context, st, m);
+  else if (m.type === "chatStop") { if (st.chat && st.chat.child) st.chat.child.kill(); }
+  else if (m.type === "chatReset") { if (st.chat && st.chat.child) st.chat.child.kill(); st.chat = null; }
+  else if (m.type === "trace") setTrace(st, !!m.on, m.lines || []);
 }
 
 async function reveal(file, line, end) {
@@ -215,13 +227,14 @@ function claudeCandidates() {
   return list;
 }
 
-function runClaude(bin, prompt, cwd, token) {
+function runClaude(bin, prompt, cwd, token, extraArgs = [], onChild = null) {
   const cfg = vscode.workspace.getConfiguration("codeFlow");
-  const args = ["-p", "--output-format", "json"];
+  const args = ["-p", "--output-format", "json", ...extraArgs];
   const model = cfg.get("claudeModel");
   if (model) args.push("--model", model);
   return new Promise((resolve, reject) => {
     const child = cp.spawn(bin, args, { cwd, shell: process.platform === "win32", env: process.env });
+    if (onChild) onChild(child);
     let out = "", err = "", done = false;
     const finish = (fn, v) => { if (!done) { done = true; clearTimeout(timer); fn(v); } };
     const timer = setTimeout(() => {
@@ -335,4 +348,117 @@ async function explain(context, file) {
   }
 }
 
-module.exports = { activate, deactivate, _test: { extractJson, cleanEnrichment, toJs } };
+// ------------------------------------------------------------------ chat
+function chatSystemPrompt() {
+  return [
+    "You are answering questions inside Code Flow, a VS Code panel that shows a Python script as a dataflow map of blocks",
+    "(each top-level statement or function call is a block; arrows carry the variables passed between them; functions can be opened",
+    "to show their own inner blocks). The user is looking at that map while they chat with you.",
+    "",
+    "Rules:",
+    "- Answer from the script below. Be concrete: name variables, columns, thresholds, defaults and the lines that matter.",
+    "- Refer to blocks by their ids in backticks (for example `n5` or `_attribute_wismo/n3`); the panel turns those into links that",
+    "  highlight the block on the map. Refer to code locations as `L123` or `L120-130`; those become links into the editor.",
+    "- Each user message starts with a [context] line that says what is selected or open on the map and where the debugger is paused,",
+    "  if it is running. 'The selected block', 'this', 'here' refer to that context.",
+    "- Keep answers short and skimmable: a few sentences, or a short list. No preamble. Only use code fences for code.",
+    "- You may read other files in the workspace with your tools if the script imports them, but do not modify anything.",
+    "- The first user message carries the block list (BLOCKS/EDGES/FLOWS) and the full script; later messages only carry the question.",
+  ].join("\n");
+}
+
+function describeState(state) {
+  if (!state) return "[context] nothing selected";
+  const bits = [];
+  if (state.selected) bits.push(`selected block ${state.selected.id}${state.selected.title ? ` "${state.selected.title}"` : ""}${state.selected.lines ? ` (L${state.selected.lines[0]}-${state.selected.lines[1]})` : ""}`);
+  if (state.open_functions && state.open_functions.length) bits.push(`open functions: ${state.open_functions.join(", ")}`);
+  if (state.open_sections && state.open_sections.length) bits.push(`open sections: ${state.open_sections.join(", ")}`);
+  if (state.debugger) bits.push(`debugger paused at L${state.debugger.stopped_at_line} in block ${state.debugger.block}; visited so far: ${(state.debugger.visited || []).join(" → ")}`);
+  return "[context] " + (bits.join("; ") || "nothing selected");
+}
+
+async function chat(context, st, m) {
+  if (!st.graph || st.graph.error) { post(st, { type: "chatReply", error: "the script could not be parsed" }); return; }
+  if (st.chat && st.chat.child) { post(st, { type: "chatReply", error: "still answering the previous question" }); return; }
+  try {
+    if (!st.chat || st.chat.hash !== st.graph.source_hash) {
+      // New conversation (or the script changed): rebuild the context once; the session id keeps the follow-ups cheap.
+      const brief = await runParser(context, st.file, ["--brief"]);
+      const source = fs.readFileSync(st.file, "utf8").split(/\r?\n/).map((l, i) => `${String(i + 1).padStart(4)}  ${l}`).join("\n");
+      st.chat = { id: crypto.randomUUID(), started: false, hash: st.graph.source_hash, system: chatSystemPrompt(),
+                  intro: `${brief}\nSCRIPT (line numbers on the left):\n${source}\n`, child: null };
+    }
+    const c = st.chat;
+    const args = ["--append-system-prompt", c.system, "--allowedTools", "Read", "Grep", "Glob", c.started ? "--resume" : "--session-id", c.id];
+    const prompt = (c.started ? "" : c.intro + "\n") + `${describeState(m.state)}\n${m.text}`;
+    let raw, lastErr;
+    for (const bin of claudeCandidates()) {
+      try {
+        raw = await runClaude(bin, prompt, path.dirname(st.file), null, args, (child) => { c.child = child; });
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (e.code !== "ENOENT") throw e;
+      }
+    }
+    if (raw == null) throw lastErr;
+    c.started = true;
+    let text = raw;
+    try {
+      const obj = JSON.parse(raw);
+      if (obj.is_error) throw new Error(obj.result || obj.subtype || "Claude Code returned an error");
+      text = obj.result != null ? obj.result : raw;
+      if (obj.session_id) c.id = obj.session_id;
+    } catch (e) {
+      if (!(e instanceof SyntaxError)) throw e;
+    }
+    post(st, { type: "chatReply", text: String(text).trim() });
+  } catch (e) {
+    const missing = e && e.code === "ENOENT";
+    post(st, { type: "chatReply", error: missing ? "Claude Code CLI not found. Install Claude Code and run `claude` once to sign in, or set codeFlow.claudePath." : String((e && e.message) || e) });
+  } finally {
+    if (st.chat) st.chat.child = null;
+  }
+}
+
+// ------------------------------------------------------------------ debugger follow
+const samePath = (a, b) => a && b && (process.platform === "win32" || process.platform === "darwin" ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+function debugTracker(session) {
+  return {
+    onDidSendMessage: async (msg) => {
+      if (!msg || msg.type !== "event") return;
+      if (msg.event === "stopped") {
+        let frames = [];
+        try {
+          const r = await session.customRequest("stackTrace", { threadId: msg.body.threadId, startFrame: 0, levels: 40 });
+          frames = (r && r.stackFrames) || [];
+        } catch (_) { return; }
+        for (const st of panels.values()) {
+          const mine = frames.filter((f) => f.source && samePath(f.source.path, st.file)).map((f) => ({ line: f.line }));
+          if (!mine.length) continue;
+          if (!st.debugging) { st.debugging = true; post(st, { type: "debug", event: "start" }); }
+          post(st, { type: "debug", event: "stopped", frames: mine });
+        }
+      } else if (msg.event === "terminated" || msg.event === "exited") {
+        for (const st of panels.values()) if (st.debugging) { st.debugging = false; post(st, { type: "debug", event: "ended" }); }
+      }
+    },
+  };
+}
+
+function setTrace(st, on, lines) {
+  clearTrace(st);
+  if (!on) return;
+  const uri = vscode.Uri.file(st.file);
+  const have = new Set(vscode.debug.breakpoints.filter((b) => b instanceof vscode.SourceBreakpoint && samePath(b.location.uri.fsPath, st.file)).map((b) => b.location.range.start.line));
+  st.traceBps = lines.filter((l) => !have.has(l - 1)).map((l) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(l - 1, 0)), true, undefined, undefined, "Code Flow trace"));
+  if (st.traceBps.length) vscode.debug.addBreakpoints(st.traceBps);
+  post(st, { type: "status", text: `trace: ${lines.length} block breakpoints set — start the debugger (F5) and press Continue to walk the map` });
+}
+function clearTrace(st) {
+  if (st.traceBps && st.traceBps.length) { try { vscode.debug.removeBreakpoints(st.traceBps); } catch (_) {} }
+  st.traceBps = [];
+}
+
+module.exports = { activate, deactivate, _test: { extractJson, cleanEnrichment, toJs, describeState } };

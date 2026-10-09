@@ -2,7 +2,8 @@
 
 See a Python script as a dataflow map instead of top-to-bottom text.
 
-- **Map | Read** switches to a plain-English walkthrough: inputs/outputs, every step in run order (branches nested), each function in depth, things to know. Built from the code alone; Claude's narratives make it read like an explanation.
+- **💬 Chat** (or `C`) opens a conversation with your local Claude Code CLI. It sees the script, the dataflow map, the block you have selected and where the debugger is paused, so "what does this do?" or "why is `out` empty here?" are answered in context. Block ids and line numbers in its answers are links into the map and the editor. The conversation is kept (Claude Code session) until you press *new chat* or the file changes.
+- **Debugger follow**: start the Python debugger (F5) as usual; whenever it pauses, the block being executed lights up on the map, blocks already run keep a trail, and the arrows between them are highlighted — down into a function's own flow when you step into it. **⏺ Trace** sets a breakpoint at the start of every block, so *Continue* walks the map one block at a time; switch it off to remove them.
 - `main()` is drawn as a frame whose contents are the pipeline; settings and helpers sit outside it. An `if`/`match` that picks between local functions is drawn as a `?` block with one arrow per arm.
 - **Open flow ▸** on any function block expands it in place into the function's own map (inputs, steps, returns); flows nest.
 - Big scripts open as an **overview of sections** (from banner comments such as `# ---- Load ----`, or Claude's grouping). Click **Open ▸** on a section to drill into its blocks; **Overview / All blocks** switches levels (`O` / `A`).

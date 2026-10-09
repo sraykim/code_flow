@@ -50,6 +50,53 @@ html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: var(--bg); color: var(--fg); font: 13px/1.4 var(--ui); }
 button { font: inherit; color: inherit; }
 
+/* ---------- chat ---------- */
+#chat { position: absolute; top: 44px; right: 0; bottom: 0; width: var(--chatw, 420px); max-width: 100%; z-index: 17; display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--border); }
+#chat[hidden] { display: none; }
+#chat .rzc { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.chat-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.chat-head b { flex: 1; }
+.chat-log { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 96%; padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; background: color-mix(in srgb, var(--k-step) 14%, transparent); white-space: pre-wrap; }
+.msg.ai { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
+.msg.ai.err { color: var(--implicit); }
+.msg.ai.wait { color: var(--muted); font-style: italic; }
+.msg p { margin: 0 0 8px; } .msg p:last-child { margin-bottom: 0; }
+.msg ul, .msg ol { margin: 0 0 8px; padding-left: 20px; }
+.msg pre { background: var(--bg); padding: 8px; border-radius: 6px; overflow: auto; font: 12px/1.5 var(--mono); margin: 0 0 8px; }
+.msg code { font: 12px var(--mono); background: var(--bg); padding: 0 4px; border-radius: 4px; }
+.msg pre code { padding: 0; background: none; }
+.msg a.blk { cursor: pointer; color: var(--k-step); font: 12px var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; text-decoration: none; }
+.msg a.blk:hover { border-color: var(--focus); }
+.msg .ctx { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.chat-ctx { font-size: 11.5px; color: var(--muted); padding: 6px 12px 0; }
+.chat-ctx code { font: 11px var(--mono); }
+.chat-form { display: flex; gap: 8px; padding: 8px 12px 10px; align-items: flex-end; }
+.chat-form textarea { flex: 1; resize: none; min-height: 38px; max-height: 160px; font: 13px/1.4 var(--ui); background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.chat-form textarea:focus { outline: none; border-color: var(--focus); }
+.chat-empty { color: var(--muted); font-size: 12.5px; padding: 6px 2px; }
+.chat-empty ul { margin: 6px 0 0; padding-left: 18px; } .chat-empty li { cursor: pointer; margin: 3px 0; } .chat-empty li:hover { color: var(--fg); }
+body.chatting #viewport { right: var(--chatw, 420px); }
+body.chatting .zoom, body.chatting .drawer { right: calc(var(--chatw, 420px) + 12px); }
+
+/* ---------- debugger ---------- */
+.node.dbg-seen, .card.dbg-seen { box-shadow: 0 0 0 2px color-mix(in srgb, var(--k-value) 55%, transparent); }
+.node.dbg-now, .card.dbg-now { box-shadow: 0 0 0 3px var(--k-value), 0 0 0 7px color-mix(in srgb, var(--k-value) 25%, transparent), 0 10px 26px rgba(0,0,0,.14); animation: dbgpulse 1.6s ease-in-out infinite; }
+@keyframes dbgpulse { 50% { box-shadow: 0 0 0 3px var(--k-value), 0 0 0 11px color-mix(in srgb, var(--k-value) 10%, transparent), 0 10px 26px rgba(0,0,0,.14); } }
+.node.dbg-now .nh::before { content: "▶ "; color: var(--k-value); }
+.node.dbg-now, .card.dbg-now { opacity: 1 !important; }
+.node .dbg-line { display: none; margin: 0 8px 6px; font: 11px var(--mono); color: var(--k-value); }
+.node.dbg-now .dbg-line { display: block; }
+body.debugging .node:not(.dbg-seen):not(.dbg-now):not(.sel) { opacity: .55; }
+body.debugging #edges .e:not(.taken):not(.hot) { opacity: .35; }
+#edges .e.taken path.line { stroke: var(--k-value); stroke-width: 2.6; }
+#edges .e.taken .lbl text { fill: var(--fg); }
+#b-trace[aria-pressed="true"] { border-color: var(--k-value); color: var(--k-value); font-weight: 600; }
+.dbg-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--k-value); white-space: nowrap; }
+
 /* ---------- top bar ---------- */
 .bar {
   position: absolute; inset: 0 0 auto 0; z-index: 20; display: flex; align-items: center; gap: 8px;
@@ -278,44 +325,6 @@ body.vscode-dark, body.vscode-high-contrast { --k-sec: #4fb6c9; }
 .frame.entry .fh .title { color: color-mix(in srgb, var(--k-step) 75%, var(--fg)); font-family: var(--mono); }
 .frame.entry .fh .sig { font: 11.5px var(--ui); color: var(--muted); }
 /* ---------- Read page ---------- */
-.read { position: absolute; inset: 44px 0 0 0; z-index: 12; overflow: auto; background: var(--bg); }
-.read article { max-width: 860px; margin: 0 auto; padding: 28px 24px 80px; font-size: 14.5px; line-height: 1.6; }
-.read h1 { font-size: 22px; margin: 0 0 6px; }
-.read h1 code { font: 600 20px var(--mono); }
-.read .lead { color: var(--muted); margin: 0 0 18px; }
-.read h2 { font-size: 17px; margin: 34px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-.read h2 .lines, .read h3 .lines { font: 11px var(--mono); color: var(--muted); margin-left: 8px; }
-.read h2.entry { color: var(--k-step); }
-.read h3 { font-size: 15px; margin: 22px 0 6px; color: var(--k-sec); }
-.read h3.fn { color: var(--k-helper); font-family: var(--mono); }
-.read h3.fn .sig { font-weight: 400; color: var(--muted); font-size: 13px; }
-.read p { margin: 6px 0 10px; }
-.read p.narr { background: color-mix(in srgb, var(--implicit) 6%, transparent); border-left: 3px solid var(--implicit); padding: 8px 12px; border-radius: 0 6px 6px 0; }
-.read p.narr::before { content: "✦ "; color: var(--implicit); }
-.read ul.io { margin: 0 0 10px; padding-left: 18px; }
-.read article { counter-reset: step; }
-.read ol.steps { list-style: none; margin: 0; padding: 0; }
-body.reading #b-fit, body.reading #seg-level, body.reading .seg[aria-label="Layout direction"], body.reading #b-tidy, body.reading .zoom, body.reading .legend-btn, body.reading .legend { display: none !important; }
-.read ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 34px 1fr; gap: 6px 10px; padding: 8px 8px; border-radius: 8px; cursor: pointer; }
-.read ol.steps > li:hover { background: var(--panel-2); }
-.read ol.steps > li::before { content: counter(step); font: 600 13px var(--mono); color: var(--muted); text-align: right; padding-top: 2px; }
-.read ol.steps li .t { font-weight: 600; }
-.read ol.steps li .t code, .read .v { font: 12.5px var(--mono); background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
-.read ol.steps li .t .l { font: 11px var(--mono); color: var(--muted); margin-left: 8px; font-weight: 400; }
-.read ol.steps li .d { grid-column: 2; }
-.read ol.steps li .doc { color: var(--muted); }
-.read ol.steps li .sum::before { content: "✦ "; color: var(--implicit); }
-.read ol.steps li .watch { color: var(--k-value); }
-.read ol.steps li .watch::before { content: "⚠ "; }
-.read ol.steps li .io { color: var(--muted); font-size: 13px; }
-.read ol.steps li .arm { color: var(--k-control); font: 12px var(--mono); }
-.read li.branch .t { color: var(--k-control); font-family: var(--mono); font-weight: 600; }
-.read li.branch .t::before { content: "? "; }
-.read ol.steps ol.steps { margin: 6px 0 0; padding-left: 0; }
-.read ol.steps .armhead { grid-column: 1 / -1; margin: 6px 0 0 44px; color: var(--k-control); font: 600 12.5px var(--mono); }
-.read .know li { margin: 4px 0; }
-.read .muted { color: var(--muted); }
-.read .back { margin-top: 30px; color: var(--muted); font-size: 13px; }
 .badge.q { border-radius: 50%; width: 18px; height: 18px; display: inline-grid; place-items: center; padding: 0; }
 @media (max-width: 640px) {
   .bar .stats, .legend { display: none; }
@@ -331,10 +340,8 @@ body.reading #b-fit, body.reading #seg-level, body.reading .seg[aria-label="Layo
   <span class="status" id="status"></span>
   <span class="spacer"></span>
   <button class="btn primary" id="b-explain" hidden title="Ask Claude Code for summaries, sections and hidden dependencies">✦ Explain with Claude</button>
-  <span class="seg" role="group" aria-label="View" id="seg-tab">
-    <button class="btn" data-tab="map" aria-pressed="true">Map</button>
-    <button class="btn" data-tab="read" aria-pressed="false" title="Plain-English walkthrough (R)">Read</button>
-  </span>
+  <button class="btn primary" id="b-chat" hidden aria-pressed="false" title="Chat with Claude about this script (C)">💬 Chat</button>
+  <button class="btn" id="b-trace" hidden aria-pressed="false" title="Debugger: stop at the start of every block, so Continue walks the map block by block">⏺ Trace</button>
   <input class="search" id="search" type="search" placeholder="Find (/)" aria-label="Find a block">
   <button class="btn" id="b-fit" title="Fit to screen (F)">Fit</button>
   <span class="seg" role="group" aria-label="Detail level" id="seg-level">
@@ -361,7 +368,13 @@ body.reading #b-fit, body.reading #seg-level, body.reading .seg[aria-label="Layo
   <button class="mi" id="m-drawer"><span class="ck"></span>Lookups &amp; imports…</button>
 </div>
 <div class="overview" id="overview" hidden><span class="src" id="ov-src"></span><span id="ov-text" title="Click to show all"></span><button class="x" id="ov-x" aria-label="Hide summary">×</button></div>
-<div id="read" class="read" hidden><article id="read-body"></article></div>
+<div id="chat" hidden>
+  <div class="rzc" id="chat-rz"></div>
+  <div class="chat-head"><b>✦ Chat with Claude</b><button class="ibtn" id="chat-new" title="Start a fresh conversation">new chat</button><button class="ibtn" id="chat-x">close</button></div>
+  <div class="chat-log" id="chat-log"></div>
+  <div class="chat-ctx" id="chat-ctx"></div>
+  <form class="chat-form" id="chat-form"><textarea id="chat-in" rows="1" placeholder="Ask about this script… (Enter to send, Shift+Enter for a new line)"></textarea><button class="btn primary" id="chat-send" type="submit">Send</button></form>
+</div>
 <div id="viewport"><div id="world"><div id="frames"></div><svg id="edges" xmlns="http://www.w3.org/2000/svg"></svg><div id="nodes"></div></div></div>
 <div class="drawer" id="drawer" hidden><h3><span>Lookups &amp; imports</span><button class="ibtn" id="drawer-x">close</button></h3><div id="drawer-body"></div></div>
 <button class="btn legend-btn" id="b-legend" aria-expanded="false">Legend</button>
@@ -402,7 +415,6 @@ let savedOpen = null;
 let view = { x: 40, y: 70, k: 1 };
 let selected = null, overviewClosed = false;
 let sizeCache = new Map();
-let tab = "map";
 
 // ---------------------------------------------------------------- storage
 const storeKey = () => (G ? "codeflow:" + G.file : "codeflow");
@@ -414,7 +426,7 @@ function loadSaved() {
   return raw;
 }
 const savedState = () => ({
-  v: 4, dir, groupMode, showLookups, showGlobals, foldCode, wheelZooms, tab,
+  v: 4, dir, groupMode, showLookups, showGlobals, foldCode, wheelZooms, chat: chatOpen,
   open: [...open].map((id) => CONT.get(id).key),
   grouped: [...CONT.values()].some((c) => c.kind === "section" && !c.synthetic),
   TB: store.TB, LR: store.LR, size: store.size || {},
@@ -854,7 +866,6 @@ function buildAll() {
   $("empty").hidden = G.nodes.length > 0;
   $("empty").textContent = "No top-level code found. Code Flow reads the statements at the top level of the script.";
   buildDrawer();
-  buildRead();
   syncControls();
   applyVisibility();
 }
@@ -1073,7 +1084,8 @@ function drawEdges() {
     const hot = inLineage && (e.source === selected || e.target === selected);
     const g = document.createElementNS(SVGNS, "g");
     const secEdge = !isLeaf(e.source) || !isLeaf(e.target);
-    g.setAttribute("class", `e k-${e.kind}` + (secEdge ? " sec" : "") + (hot ? " hot" : related && !inLineage ? " dim" : ""));
+    const taken = DBG.taken.has(e.source + ">" + e.target);
+    g.setAttribute("class", `e k-${e.kind}` + (secEdge ? " sec" : "") + (taken ? " taken" : "") + (hot ? " hot" : related && !inLineage ? " dim" : ""));
     const p = document.createElementNS(SVGNS, "path"); p.setAttribute("class", "line");
     p.setAttribute("d", `M${sx},${sy} C${c1[0]},${c1[1]} ${c2[0]},${c2[1]} ${tx},${ty}`);
     p.setAttribute("marker-end", `url(#ar-${hot && e.kind !== "implicit" && e.kind !== "branch" ? "hot" : e.kind})`);
@@ -1202,6 +1214,7 @@ function select(id) {
   for (const [cid, c] of cards) { c.classList.toggle("sel", cid === selected); c.classList.toggle("dim", !!rel && !rel.has(cid)); }
   for (const [cid, f] of frames) f.classList.toggle("sel", cid === selected);
   drawEdges();
+  if (chatOpen) { chatContext(); if (!chatMsgs.length) renderChat(); }
 }
 
 // ---------------------------------------------------------------- open / close
@@ -1375,13 +1388,6 @@ function setupToolbar() {
   $("b-fit").onclick = fit;
   $("b-tidy").onclick = () => { layoutAll(true); place(); drawEdges(); save(); requestAnimationFrame(fit); };
   document.querySelectorAll("#seg-level [data-level]").forEach((b) => (b.onclick = () => setLevel(b.dataset.level)));
-  document.querySelectorAll("#seg-tab [data-tab]").forEach((b) => (b.onclick = () => setTab(b.dataset.tab)));
-  $("read-body").addEventListener("click", (ev) => {
-    const li = ev.target.closest("[data-go]"); if (!li) return;
-    const loc = ev.target.closest("[data-line]");
-    if (loc && vscodeApi) { vscodeApi.postMessage({ type: "reveal", line: +loc.dataset.line, end: +loc.dataset.end }); return; }
-    goToStep(li.dataset.go, li.dataset.flow);
-  });
   document.querySelectorAll(".seg [data-dir]").forEach((b) => (b.onclick = () => setDir(b.dataset.dir)));
   const menu = $("menu");
   const closeMenu = () => { menu.hidden = true; $("b-view").setAttribute("aria-expanded", "false"); };
@@ -1426,7 +1432,7 @@ function setupToolbar() {
     else if (ev.key === "d" || ev.key === "D") setDir(dir === "TB" ? "LR" : "TB");
     else if (ev.key === "+" || ev.key === "=") { const r = $("viewport").getBoundingClientRect(); zoomAt(1.2, r.width / 2, r.height / 2); }
     else if (ev.key === "-" || ev.key === "_") { const r = $("viewport").getBoundingClientRect(); zoomAt(1 / 1.2, r.width / 2, r.height / 2); }
-    else if (ev.key === "r" || ev.key === "R") setTab(tab === "read" ? "map" : "read");
+    else if (ev.key === "c" || ev.key === "C") { if (vscodeApi) setChat(!chatOpen); }
     else if (ev.key === "o" || ev.key === "O") setLevel("overview");
     else if (ev.key === "a" || ev.key === "A") setLevel("all");
     else if (ev.key === "Escape") { select(null); closeMenu(); }
@@ -1434,7 +1440,7 @@ function setupToolbar() {
   if (vscodeApi) { $("b-explain").hidden = false; $("b-explain").onclick = () => vscodeApi.postMessage({ type: "explain" }); }
   const kinds = [["step", "main(): the program"], ["sec", "section (Open ▸)"], ["helper", "function (Open flow ▸)"], ["step", "function call"], ["code", "top-level code"], ["value", "settings / inputs"], ["control", "branch: one arm runs"]];
   const lines = [["--edge", "variable passed on", ""], ["--k-control", "branch arm", ""], ["--k-helper", "calls helper", "2 4"], ["--implicit", "Claude: hidden link", "7 4"],
-                 ["--edge", "global read (View ▾ to show)", "5 4"], ["--focus", "direct link of the selected block", ""]];
+                 ["--edge", "global read (View ▾ to show)", "5 4"], ["--focus", "direct link of the selected block", ""], ["--k-value", "debugger: path taken", ""]];
   const sw = (c, dash) => `<svg viewBox="0 0 26 8"><line x1="0" y1="4" x2="26" y2="4" style="stroke:var(${c});stroke-width:2;stroke-dasharray:${dash}"/></svg>`;
   $("legend").innerHTML = kinds.map(([k, l]) => `<span class="it" data-k="${k}"><span class="sw"></span>${l}</span>`).join("") +
     `<span class="it"><span class="chip lk">NAME</span>lookup: tag, no arrow</span>` +
@@ -1451,159 +1457,241 @@ function setGroup(mode) {
   groupMode = mode; buildAll(); layoutAll(false); place(); drawEdges(); initialView(); save();
   $("menu").hidden = true;
 }
-// ---------------------------------------------------------------- Read page
-function setTab(t) {
-  tab = t === "read" ? "read" : "map";
-  $("read").hidden = tab !== "read";
-  document.body.classList.toggle("reading", tab === "read");
-  $("overview").hidden = tab === "read" || !($("ov-text").textContent) || overviewClosed;
-  document.querySelectorAll("#seg-tab [data-tab]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tab === tab)));
-  if (tab === "map") requestAnimationFrame(() => { layoutAll(false); place(); drawEdges(); });
+// ---------------------------------------------------------------- chat with Claude
+let chatOpen = false, chatBusy = false, chatMsgs = [];
+function setChat(on) {
+  chatOpen = !!on;
+  $("chat").hidden = !chatOpen;
+  document.body.classList.toggle("chatting", chatOpen);
+  $("b-chat").setAttribute("aria-pressed", String(chatOpen));
+  if (chatOpen) { renderChat(); chatContext(); setTimeout(() => $("chat-in").focus(), 50); }
+  requestAnimationFrame(() => { layoutAll(false); place(); drawEdges(); });
   save();
 }
-function goToStep(id, flowName) {
-  setTab("map");
-  if (!flowName) { focusNode(id); return; }
-  // A step inside a function: open that function's flow (from its first call site) and focus the inner block.
-  let block = [...NODES.values()].find((n) => n.def === flowName && !n.inFlow) || [...NODES.values()].find((n) => n.def === flowName);
+function viewState() {
+  // What the reader is looking at, so Claude can answer in context.
+  const sel = selected && NODES.get(selected);
+  const st = { file: G.file_name, selected: null, open_sections: [], open_functions: [] };
+  if (sel) st.selected = { id: noteKey(sel), title: sel.title, lines: sel.lines };
+  else if (selected && isCont(selected)) st.selected = { id: selected, title: CONT.get(selected).title };
+  for (const c of CONT.values()) {
+    if (c.synthetic) continue;
+    if (c.kind === "section" && open.has(c.id)) st.open_sections.push(c.title);
+    if (c.kind === "flow") st.open_functions.push(c.title);
+  }
+  if (DBG.now) st.debugger = { stopped_at_line: DBG.line, block: DBG.now, visited: DBG.order.slice(-12) };
+  return st;
+}
+function chatContext() {
+  const st = G ? viewState() : null, c = $("chat-ctx");
+  if (!st) { c.textContent = ""; return; }
+  const bits = [];
+  if (st.selected) bits.push(`selected: <code>${esc(st.selected.id)}</code> ${esc(st.selected.title || "")}`);
+  if (st.open_functions.length) bits.push(`open: ${st.open_functions.map((f) => `<code>${esc(f)}</code>`).join(" ")}`);
+  if (st.debugger) bits.push(`debugger at line ${st.debugger.stopped_at_line}`);
+  c.innerHTML = bits.length ? "Claude sees the script, the map and — " + bits.join(" · ") : "Claude sees the script and the map. Select a block to ask about it.";
+}
+const ALL_IDS = () => { const ids = G.nodes.map((n) => n.id); for (const f of Object.values(G.flows || {})) for (const n of f.nodes) ids.push(f.name + "/" + n.id); return new Set(ids); };
+function mdLite(text) {
+  // Minimal markdown: fences, inline code, bold, lists, paragraphs. Block ids and line refs become links.
+  const ids = ALL_IDS();
+  const blk = (id) => `<a class="blk" data-go="${id}">${id}</a>`;
+  const lineLnk = (label, a, b) => `<a class="blk" data-line="${a}${b ? "-" + b : ""}">${label}</a>`;
+  const inline = (t) => {
+    const hold = [];
+    const keep = (html) => { hold.push(html); return `\u0000${hold.length - 1}\u0000`; };
+    let h = esc(t).replace(/`([^`\n]+)`/g, (m, c) => {
+      const mm = c.match(/^L?(\d+)(?:\s*[–-]\s*L?(\d+))?$/);
+      return keep(ids.has(c) ? blk(c) : mm ? lineLnk(c, mm[1], mm[2]) : `<code>${c}</code>`);
+    });
+    h = h.replace(/\*\*([^*]+)\*\*/g, (m, b) => keep(`<b>${b}</b>`));
+    h = h.replace(/\b(lines? )(\d+)(?:\s*[–-]\s*(\d+))?/gi, (m, w, a, b) => keep(lineLnk(m, a, b)));
+    h = h.replace(/\b([A-Za-z_]\w*\/)?([nhb]\d+)\b/g, (m) => (ids.has(m) ? keep(blk(m)) : m));
+    return h.replace(/\u0000(\d+)\u0000/g, (m, i) => hold[+i]);
+  };
+  const parts = text.split(/```\w*\n?/); let h = "";
+  parts.forEach((part, i) => {
+    if (i % 2) { h += `<pre><code>${esc(part.replace(/\n$/, ""))}</code></pre>`; return; }
+    for (const para of part.split(/\n{2,}/)) {
+      const ls = para.split("\n").filter((l) => l.trim());
+      if (!ls.length) continue;
+      if (ls.every((l) => /^\s*[-*•] /.test(l))) h += `<ul>${ls.map((l) => `<li>${inline(l.replace(/^\s*[-*•] /, ""))}</li>`).join("")}</ul>`;
+      else if (ls.every((l) => /^\s*\d+[.)] /.test(l))) h += `<ol>${ls.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)] /, ""))}</li>`).join("")}</ol>`;
+      else if (/^#{1,4} /.test(ls[0]) && ls.length === 1) h += `<p><b>${inline(ls[0].replace(/^#+ /, ""))}</b></p>`;
+      else h += `<p>${ls.map(inline).join("<br>")}</p>`;
+    }
+  });
+  return h;
+}
+function renderChat() {
+  const log = $("chat-log"); log.innerHTML = "";
+  if (!chatMsgs.length) {
+    const starters = ["What does this script do, in plain English?", "Walk me through the steps in order.", selected ? "Explain the selected block and what depends on it." : "Which blocks write files or have side effects?", "What could go wrong with empty or missing data?"];
+    log.innerHTML = `<div class="chat-empty">Ask anything about <b>${esc(G ? G.file_name : "the script")}</b>. Claude Code answers with the script, the dataflow map and your current selection in view. Block ids in its answers are links to the map.<ul>${starters.map((q) => `<li data-q="${esc(q)}">${esc(q)}</li>`).join("")}</ul></div>`;
+    return;
+  }
+  for (const m of chatMsgs) {
+    const d = document.createElement("div");
+    d.className = "msg " + m.role + (m.err ? " err" : "") + (m.wait ? " wait" : "");
+    if (m.role === "user") { d.textContent = m.text; if (m.ctx) d.insertAdjacentHTML("afterbegin", `<div class="ctx">${esc(m.ctx)}</div>`); }
+    else d.innerHTML = m.wait ? esc(m.text) : mdLite(m.text || "");
+    log.appendChild(d);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+function sendChat(text) {
+  text = (text || "").trim();
+  if (!text || !vscodeApi || !G || chatBusy) return;
+  const st = viewState();
+  const ctx = st.selected ? `about ${st.selected.id}` + (st.debugger ? ` · debugger at L${st.debugger.stopped_at_line}` : "") : st.debugger ? `debugger at L${st.debugger.stopped_at_line}` : "";
+  chatMsgs.push({ role: "user", text, ctx });
+  chatMsgs.push({ role: "ai", text: "Claude is thinking…", wait: true });
+  chatBusy = true; $("chat-send").textContent = "Stop";
+  renderChat();
+  vscodeApi.postMessage({ type: "chat", text, state: st });
+}
+function chatReply(m) {
+  const last = chatMsgs[chatMsgs.length - 1];
+  if (m.partial != null) { if (last && last.role === "ai") { last.text = m.partial; last.wait = false; } renderChat(); return; }
+  if (last && last.role === "ai") { last.text = m.error ? "Claude could not answer: " + m.error : m.text || "(no answer)"; last.wait = false; last.err = !!m.error; }
+  chatBusy = false; $("chat-send").textContent = "Send";
+  renderChat();
+}
+function goTo(id) {
+  // Reveal a block by its note key: "n5" or "fname/n3".
+  if (!G) return;
+  const i = id.indexOf("/");
+  if (i < 0) { if (NODES.has(id)) focusNode(id); return; }
+  const fname = id.slice(0, i), inner = id.slice(i + 1);
+  const already = [...CONT.values()].find((c) => c.kind === "flow" && c.title === fname);
+  if (already) { focusNode(already.id + "/" + inner); return; }
+  const block = [...NODES.values()].find((n) => n.def === fname && !n.inFlow) || [...NODES.values()].find((n) => n.def === fname);
   if (!block) return;
-  let cid = openFlowOf.get(block.id);
-  if (!cid) { cid = openFlow(block.id); if (!cid) return; refresh(parentOf.get(block.id)); }
-  requestAnimationFrame(() => focusNode(cid + "/" + id));
+  const cid = openFlow(block.id); if (!cid) return;
+  refresh(parentOf.get(block.id));
+  requestAnimationFrame(() => focusNode(cid + "/" + inner));
 }
-const codeList = (vars) => vars.map((v) => `<span class="v">${esc(v)}</span>`).join(" ");
-function stepHTML(n, flowName) {
-  const d = n.def ? G.defs[n.def] : null;
-  const en = noteOf(n);
-  const lines = n.lines[1] > n.lines[0] ? `L${n.lines[0]}–${n.lines[1]}` : `L${n.lines[0]}`;
-  const loc = vscodeApi ? `<span class="l" data-line="${n.lines[0]}" data-end="${n.lines[1]}" title="Show in editor">${lines}</span>` : `<span class="l">${lines}</span>`;
-  const go = `data-go="${esc(n.innerId || n.id)}"${flowName ? ` data-flow="${esc(flowName)}"` : ""}`;
-  if (n.kind === "branch") {
-    return `<li class="branch" ${go}><div class="t">${esc(n.title)}${loc}</div>` +
-      (en && en.summary ? `<div class="d sum">${esc(en.summary)}</div>` : `<div class="d muted">One of ${n.arms.length} arms runs, depending on ${codeList(n.reads)}.</div>`) + `</li>`;
-  }
-  let title;
-  if (d) title = `Call <code>${esc(d.name)}(${esc(d.params.join(", "))})</code>`;
-  else if (n.kind === "input") title = "Inputs";
-  else if (n.kind === "value") title = `Settings: ${codeList(n.writes.slice(0, 4))}${n.writes.length > 4 ? " …" : ""}`;
-  else title = n.title_from === "code" ? `<code>${esc(n.title)}</code>` : esc(cap(n.title));
-  if (n.kind === "helper" || n.kind === "unused") title = `Define <code>${esc(d.name)}(${esc(d.params.join(", "))})</code>` + (n.kind === "unused" ? " <span class='muted'>(never called)</span>" : " <span class='muted'>(used by later steps)</span>");
-  const ex = exportedBy.get(n.id) || new Set();
-  const outs = (n.writes || []).filter((v) => ex.has(v));
-  const io = [];
-  if (n.reads && n.reads.length) io.push(`takes ${codeList(n.reads)}`);
-  if (n.lookups && n.lookups.length) io.push(`uses ${codeList(n.lookups)}`);
-  if (outs.length) io.push(`produces ${codeList(outs)}`);
-  if (n.returns) io.push(`<b>returns</b>`);
-  let h = `<li ${go}><div class="t">${title}${loc}</div>`;
-  if (d && d.doc) h += `<div class="d doc">${esc(d.doc)}</div>`;
-  if (en && en.summary) h += `<div class="d sum">${esc(en.summary)}</div>`;
-  if (en && en.watch) h += `<div class="d watch">${esc(en.watch)}</div>`;
-  if (io.length) h += `<div class="d io">${io.join(" · ")}</div>`;
-  return h + `</li>`;
-}
-// Steps in run order with branch arms nested under their branch.
-function stepsHTML(nodes, flowName) {
-  let h = `<ol class="steps">`, i = 0;
-  while (i < nodes.length) {
-    const n = nodes[i];
-    if (n.kind === "branch") {
-      const bid = n.innerId || n.id;
-      h += stepHTML(n, flowName).replace(/<\/li>$/, "");
-      let j = i + 1, lastArm = null, armOpen = false;
-      while (j < nodes.length && nodes[j].arm && nodes[j].arm.of === bid) {
-        if (nodes[j].arm.label !== lastArm) {
-          if (armOpen) h += `</ol>`;
-          h += `<div class="armhead">↳ ${esc(nodes[j].arm.label)}</div><ol class="steps">`;
-          lastArm = nodes[j].arm.label; armOpen = true;
-        }
-        h += stepHTML(nodes[j], flowName);
-        j++;
-      }
-      if (armOpen) h += `</ol>`;
-      h += `</li>`;
-      i = j;
-    } else { h += stepHTML(n, flowName); i++; }
-  }
-  return h + `</ol>`;
-}
-function buildRead() {
-  const E2 = E || {};
-  const srcOrder = (a, b) => NODES.get(a).lines[0] - NODES.get(b).lines[0];
-  let h = `<h1>How <code>${esc(G.file_name)}</code> works</h1>`;
-  const lead = E2.summary || G.module_doc;
-  if (lead) h += `<p class="lead">${esc(lead)}</p>`;
-  if (!E2.summary) h += `<p class="muted">This walkthrough is built from the code's structure alone. Run ✦ Explain with Claude for plain-English notes and narrative.</p>`;
-  if (E2.inputs && E2.inputs.length) h += `<p><b>Reads:</b></p><ul class="io">${E2.inputs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
-  if (E2.outputs && E2.outputs.length) h += `<p><b>Writes:</b></p><ul class="io">${E2.outputs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
-
-  h += `<h2>Step by step</h2>`;
-  const secNarr = (c) => {
-    if (!E2.sections && !E2.stages) return "";
-    const secN = E2.sections && E2.sections[c.id.replace(/m$/, "")] && E2.sections[c.id.replace(/m$/, "")].narrative;
-    const stage = Array.isArray(E2.stages) && E2.stages.find((st) => st.name === c.title);
-    const t = secN || (stage && stage.narrative);
-    return t ? `<p class="narr">${esc(t)}</p>` : "";
+function setupChat() {
+  if (!vscodeApi) return;
+  $("b-chat").hidden = false;
+  $("b-chat").onclick = () => setChat(!chatOpen);
+  $("chat-x").onclick = () => setChat(false);
+  $("chat-new").onclick = () => { chatMsgs = []; chatBusy = false; $("chat-send").textContent = "Send"; vscodeApi.postMessage({ type: "chatReset" }); renderChat(); };
+  const ta = $("chat-in");
+  const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(160, ta.scrollHeight) + "px"; };
+  ta.addEventListener("input", grow);
+  ta.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("chat-form").requestSubmit(); } });
+  $("chat-form").onsubmit = (ev) => {
+    ev.preventDefault();
+    if (chatBusy) { vscodeApi.postMessage({ type: "chatStop" }); return; }
+    sendChat(ta.value); ta.value = ""; grow();
   };
-  const renderContainer = (cid, level) => {
-    const c = CONT.get(cid);
-    let out = "";
-    if (c.kind === "entry") {
-      out += `<h2 class="entry"><code>${esc(c.title)}()</code> — the program<span class="lines">L${c.lines[0]}–${c.lines[1]}</span></h2>`;
-      out += `<p class="muted">Everything below runs when the script is executed; the settings and helpers above are defined first.</p>`;
-    } else if (c.kind === "section" && !c.synthetic) {
-      out += `<h3>${esc(cap(c.title))}<span class="lines">L${c.lines[0]}–${c.lines[1]}</span></h3>`;
-      if (c.summary) out += `<p>${esc(c.summary)}</p>`;
-      out += secNarr(c);
-    }
-    const kids = c.children.slice();
-    const leafKids = kids.filter((k) => isLeaf(k)).sort(srcOrder);
-    const contKids = kids.filter((k) => isCont(k));
-    if (contKids.length) {
-      // Interleave child containers with loose blocks by line.
-      const items = [...leafKids.map((k) => ({ k, line: NODES.get(k).lines[0], leaf: true })), ...contKids.map((k) => ({ k, line: CONT.get(k).lines[0], leaf: false }))].sort((a, b) => a.line - b.line);
-      let run = [];
-      const flush = () => { if (run.length) { out += stepsHTML(run.map((k) => NODES.get(k))); run = []; } };
-      for (const it of items) { if (it.leaf) run.push(it.k); else { flush(); out += renderContainer(it.k, level + 1); } }
-      flush();
-    } else if (leafKids.length) {
-      out += stepsHTML(leafKids.map((k) => NODES.get(k)));
-    }
-    return out;
-  };
-  for (const cid of ROOT) h += renderContainer(cid, 0);
+  $("chat-log").addEventListener("click", (ev) => {
+    const q = ev.target.closest("[data-q]"); if (q) { sendChat(q.dataset.q); return; }
+    const a = ev.target.closest("a.blk"); if (!a) return;
+    if (a.dataset.go) goTo(a.dataset.go);
+    else if (a.dataset.line) { const [l, e] = a.dataset.line.split("-"); vscodeApi.postMessage({ type: "reveal", line: +l, end: +(e || l) }); }
+  });
+  // drag the panel edge to resize it
+  let rz = null;
+  $("chat-rz").addEventListener("pointerdown", (ev) => { rz = { x: ev.clientX, w: $("chat").offsetWidth }; ev.target.setPointerCapture(ev.pointerId); ev.preventDefault(); });
+  $("chat-rz").addEventListener("pointermove", (ev) => { if (!rz) return; const w = Math.max(300, Math.min(window.innerWidth - 200, rz.w - (ev.clientX - rz.x))); document.documentElement.style.setProperty("--chatw", w + "px"); });
+  $("chat-rz").addEventListener("pointerup", () => { rz = null; });
+}
 
-  const flows = Object.values(G.flows || {});
-  if (flows.length) {
-    h += `<h2>Functions in depth</h2><p class="muted">Each function's body, step by step. Click a step to open the function on the map.</p>`;
-    for (const f of flows) {
-      const d = G.defs[f.name];
-      h += `<h3 class="fn">${esc(f.name)}<span class="sig">(${esc(f.params.join(", "))})</span><span class="lines">L${f.lines[0]}–${f.lines[1]}</span></h3>`;
-      if (d && d.doc) h += `<p class="muted">${esc(d.doc)}</p>`;
-      const fn = E2.functions && E2.functions[f.name];
-      if (fn && fn.narrative) h += `<p class="narr">${esc(fn.narrative)}</p>`;
-      const inner = f.nodes.filter((n) => n.kind !== "input").map((n) => ({ ...n, innerId: n.id, flowName: f.name }));
-      h += stepsHTML(inner, f.name);
-    }
+// ---------------------------------------------------------------- debugger follow
+const DBG = { active: false, now: null, line: 0, seen: new Set(), order: [], taken: new Set(), trace: false };
+function nodeAtLine(nodes, line) {
+  let best = null;
+  for (const n of nodes) if (n.lines && line >= n.lines[0] && line <= n.lines[1] && (!best || n.lines[1] - n.lines[0] <= best.lines[1] - best.lines[0])) best = n;
+  return best;
+}
+function locateFrames(frames) {
+  // frames: innermost first. Walk from the outermost frame in this file inward: the first mapped frame gives the
+  // top-level block; each deeper frame inside a function with a flow opens that flow (from the block that called it)
+  // and narrows the target to the inner block. Returns { top, target, opened } or null when nothing maps.
+  const fr = frames.slice().reverse(), top = G.nodes;
+  const plain = top.filter((n) => n.kind !== "helper" && n.kind !== "unused" && n.kind !== "input");
+  let i = 0, topId = null;
+  for (; i < fr.length; i++) {
+    const n = nodeAtLine(plain, fr[i].line) || nodeAtLine(top, fr[i].line);
+    if (n) { topId = n.id; i++; break; }
   }
-
-  const know = [];
-  if (Array.isArray(E2.implicit_edges)) for (const e of E2.implicit_edges) {
-    if (NODES.has(e.source) && NODES.has(e.target)) know.push(`<b>Hidden link:</b> ${esc(NODES.get(e.source).title)} → ${esc(NODES.get(e.target).title)} — ${esc(e.reason || e.label || "")}`);
+  if (!topId) return null;
+  let target = topId, cid = null, opened = false;
+  for (; i < fr.length; i++) {
+    const line = fr[i].line;
+    const fe = Object.entries(G.flows || {}).find(([, f]) => line >= f.lines[0] && line <= f.lines[1]);
+    if (!fe) continue;                               // a function without a flow: stay on the caller's block
+    const [fname, f] = fe;
+    const cur = NODES.get(target);
+    let block = cur && cur.def === fname ? target : null;
+    if (!block && cid) block = (CONT.get(cid).children || []).find((id) => NODES.get(id) && NODES.get(id).def === fname) || null;
+    if (!block && !cid) { const b = top.find((n) => n.def === fname); if (b) block = b.id; }
+    if (!block) break;
+    let c = openFlowOf.get(block);
+    if (!c) { c = openFlow(block); if (!c) break; opened = true; }
+    cid = c;
+    const inner = nodeAtLine(f.nodes.filter((n) => n.kind !== "input"), line) || nodeAtLine(f.nodes, line);
+    if (!inner) { target = block; break; }
+    target = cid + "/" + inner.id;
   }
-  if (E2.nodes) for (const [id, v] of Object.entries(E2.nodes)) if (v.watch) {
-    const n = NODES.get(id); const label = n ? (n.def || n.title) : id.replace("/", " › ");
-    know.push(`<b>${esc(label)}:</b> ${esc(v.watch)}`);
+  return { top: topId, target, opened };
+}
+function debugStop(m) {
+  if (!G) return;
+  const frames = (m.frames || []).filter((f) => f && f.line);
+  const loc = locateFrames(frames);
+  DBG.active = true; DBG.line = frames[0] ? frames[0].line : 0;
+  document.body.classList.add("debugging");
+  const target = loc ? loc.target : null, prev = DBG.now;
+  if (loc && loc.opened) refresh();
+  if (target && target !== prev) {
+    let p = parentOf.get(target), changed = false;
+    while (p) { if (!open.has(p)) { open.add(p); changed = true; } p = parentOf.get(p); }
+    if (changed) refresh();
+    DBG.seen.add(target); DBG.order.push(target);
+    if (loc.top) DBG.seen.add(loc.top);
+    for (const e of anyEdges()) if (e.target === visId(target) && DBG.seen.has(e.source) && e.source !== e.target) DBG.taken.add(e.source + ">" + e.target);
   }
-  for (const n of G.nodes) if (n.kind === "unused") know.push(`<code>${esc(n.def)}()</code> is defined but never called.`);
-  if (G.lookups && G.lookups.length) know.push(`Used almost everywhere: ${codeList(G.lookups.map((l) => l.name))}.`);
-  if (know.length) h += `<h2>Things to know</h2><ul class="know">${know.map((k) => `<li>${k}</li>`).join("")}</ul>`;
-  h += `<p class="back">Click any step to see it on the map · press R to switch views</p>`;
-  $("read-body").innerHTML = h;
-  $("read").hidden = tab !== "read";
-  document.body.classList.toggle("reading", tab === "read");
-  document.querySelectorAll("#seg-tab [data-tab]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tab === tab)));
-  if (tab === "read") $("overview").hidden = true;
+  DBG.now = target;
+  paintDebug();
+  if (target && target !== prev) requestAnimationFrame(() => { layoutAll(false); place(); drawEdges(); const b = box(target); if (!boxVisible(b)) centerOn(b); });
+  setStatus(`⏸ debugger at line ${DBG.line}` + (target ? "" : " (outside the mapped blocks)"));
+  chatContext();
+}
+function boxVisible(b) {
+  const vp = $("viewport").getBoundingClientRect();
+  const x = b.x * view.k + view.x, y = b.y * view.k + view.y, w = b.w * view.k, h = b.h * view.k;
+  return x >= 0 && y >= topInset() && x + w <= vp.width && y + h <= vp.height;
+}
+function debugEnd() {
+  DBG.active = false; DBG.now = null; document.body.classList.remove("debugging");
+  paintDebug(); setStatus(DBG.order.length ? `debugger finished · ${DBG.seen.size} blocks visited (trail stays until the next run)` : "");
+  chatContext();
+}
+function debugReset() { DBG.seen.clear(); DBG.order = []; DBG.taken.clear(); DBG.now = null; paintDebug(); }
+function paintDebug() {
+  for (const [id, el] of els) {
+    el.classList.toggle("dbg-now", DBG.active && id === DBG.now);
+    el.classList.toggle("dbg-seen", DBG.seen.has(id) && !(DBG.active && id === DBG.now));
+    let l = el.querySelector(".dbg-line");
+    if (DBG.active && id === DBG.now) { if (!l) { l = document.createElement("div"); l.className = "dbg-line"; el.appendChild(l); } l.textContent = `paused at line ${DBG.line}`; }
+  }
+  for (const [cid, c] of cards) { c.classList.toggle("dbg-now", DBG.active && DBG.now && visId(DBG.now) === cid); c.classList.toggle("dbg-seen", [...DBG.seen].some((id) => visId(id) === cid)); }
+  drawEdges();
+}
+function tracePoints() {
+  // First line of every block, so the debugger stops once per block.
+  const lines = new Set();
+  for (const n of G.nodes) if (n.lines && n.kind !== "helper" && n.kind !== "unused" && n.kind !== "input") lines.add(n.lines[0]);
+  for (const f of Object.values(G.flows || {})) for (const n of f.nodes) if (n.lines && n.kind !== "input") lines.add(n.lines[0]);
+  return [...lines].sort((a, b) => a - b);
+}
+function setupDebug() {
+  if (!vscodeApi) return;
+  $("b-trace").hidden = false;
+  $("b-trace").onclick = () => { DBG.trace = !DBG.trace; $("b-trace").setAttribute("aria-pressed", String(DBG.trace)); vscodeApi.postMessage({ type: "trace", on: DBG.trace, lines: DBG.trace ? tracePoints() : [] }); };
 }
 
 function setStatus(text, isErr) { const s = $("status"); s.textContent = text || ""; s.classList.toggle("err", !!isErr); }
@@ -1618,12 +1706,13 @@ function load(graph, enrich, keepView) {
     if (saved) {
       dir = saved.dir === "TB" ? "TB" : "LR";
       groupMode = saved.groupMode || "comments"; showLookups = !!saved.showLookups; showGlobals = !!saved.showGlobals;
-      foldCode = !!saved.foldCode; wheelZooms = !!saved.wheelZooms; tab = saved.tab === "read" ? "read" : "map";
+      foldCode = !!saved.foldCode; wheelZooms = !!saved.wheelZooms; chatOpen = !!saved.chat && !!vscodeApi;
       store = { TB: saved.TB || { top: {}, inner: {} }, LR: saved.LR || { top: {}, inner: {} }, size: saved.size || {} };
       savedOpen = saved.grouped ? saved.open || [] : null;   // a flat map saved nothing worth restoring
     }
   }
   buildAll();
+  if (chatOpen && $("chat").hidden) setChat(true);
   requestAnimationFrame(() => { layoutAll(false); place(); drawEdges(); if (!keepView) initialView(); });
 }
 function applyEnrichment(enrich) {
@@ -1636,10 +1725,20 @@ window.addEventListener("message", (ev) => {
   if (m.type === "graph") { load(m.graph, m.enrichment, !!G); setStatus(""); }
   else if (m.type === "enrichment") { applyEnrichment(m.enrichment); setStatus(""); }
   else if (m.type === "status") { if ("text" in m) setStatus(m.text, m.error); $("b-explain").disabled = !!m.busy; }
+  else if (m.type === "chatReply") chatReply(m);
+  else if (m.type === "chatOpen") { setChat(true); if (m.text) sendChat(m.text); }
+  else if (m.type === "debug") {
+    if (m.event === "start") { debugReset(); select(null); DBG.active = true; document.body.classList.add("debugging"); setStatus("▶ debugger running — the map follows each stop"); }
+    else if (m.event === "stopped") debugStop(m);
+    else if (m.event === "ended") debugEnd();
+    else if (m.event === "trace") { DBG.trace = !!m.on; $("b-trace").setAttribute("aria-pressed", String(DBG.trace)); }
+  }
 });
 
 setupToolbar();
 setupInteraction();
+setupChat();
+setupDebug();
 if (window.__CF_GRAPH__) load(window.__CF_GRAPH__, window.__CF_ENRICH__, false);
 if (vscodeApi) vscodeApi.postMessage({ type: "ready" });
 })();

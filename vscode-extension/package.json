@@ -1,8 +1,8 @@
 {
   "name": "code-flow",
   "displayName": "Code Flow",
-  "description": "See a Python script as a map: sections you open into blocks, functions you open into their own flow, branches drawn as forks, with optional explanations from Claude Code.",
-  "version": "0.5.1",
+  "description": "See a Python script as a map of code blocks linked by the variables they pass. Chat with Claude Code about it, and watch the map follow the debugger block by block.",
+  "version": "0.6.0",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {
@@ -17,7 +17,9 @@
     "dataflow",
     "pipeline",
     "visualize",
-    "claude"
+    "claude",
+    "debugger",
+    "chat"
   ],
   "main": "./extension.js",
   "activationEvents": [],
@@ -31,6 +33,10 @@
       {
         "command": "codeFlow.explain",
         "title": "Code Flow: Explain Script with Claude Code"
+      },
+      {
+        "command": "codeFlow.chat",
+        "title": "Code Flow: Chat with Claude about Script"
       }
     ],
     "menus": {
@@ -58,6 +64,11 @@
           "command": "codeFlow.explain",
           "when": "resourceLangId == python",
           "group": "navigation@91"
+        },
+        {
+          "command": "codeFlow.chat",
+          "when": "resourceLangId == python",
+          "group": "navigation@92"
         }
       ],
       "commandPalette": [
@@ -67,6 +78,10 @@
         },
         {
           "command": "codeFlow.explain",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "codeFlow.chat",
           "when": "editorLangId == python"
         }
       ]
@@ -110,7 +125,7 @@
         "codeFlow.timeoutSeconds": {
           "type": "number",
           "default": 240,
-          "description": "How long to wait for Claude Code."
+          "description": "How long to wait for Claude Code (Explain and each chat answer)."
         }
       }
     }

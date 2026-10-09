@@ -14,7 +14,10 @@ read_config ──cfg──┘
 is drawn as a fork, and any function block can be opened in place into its own map
 (**Open flow ▸**), as deep as the calls go. Maps open left-to-right.
 
-A **Read** tab turns the same graph into a step-by-step walkthrough in plain English.
+In VS Code, **💬 Chat** opens a conversation with Claude Code that sees the script, the map
+and whatever you have selected, and **⏺ Trace** makes the map follow the Python debugger:
+the block being executed lights up, the blocks already run keep a trail, and the arrows taken
+are highlighted, down into opened functions.
 
 Big scripts open as an **overview**: one card per section (from banner comments like
 `# ---- Load ----`, or Claude's own grouping), joined only by the variables that cross
@@ -43,7 +46,7 @@ Updates: `claude plugin marketplace update code-flow` then `claude plugin update
 
 **VS Code extension**
 ```
-code --install-extension dist/code-flow-0.5.1.vsix
+code --install-extension dist/code-flow-0.6.0.vsix
 ```
 Open a `.py` file → click the Code Flow icon in the editor title bar (or right-click → *Code Flow: Visualize Script*).
 Needs Python 3.8+ (standard library only). For explanations, Claude Code must be installed and signed in;

@@ -86,12 +86,10 @@ The scripts live in the `scripts/` folder of this skill's directory. Below,
 
 ## Using the page
 
-**Map | Read** (or `R`) switches between the map and a plain-English
-walkthrough: what the script reads and writes, every step in run order with
-branches nested under their condition, each function in depth, and a "Things
-to know" list. It is built from the parser alone and gets Claude's narratives
-(`inputs`, `outputs`, per-section/stage `narrative`, `functions[name].narrative`)
-when the enrichment has them. Clicking a step shows it on the map.
+When the user wants the script explained in prose, do it here in the
+conversation with the brief and the script in hand — the page is for the map.
+(In VS Code the same page has a **💬 Chat** panel that talks to Claude Code
+with the map in view, and the map follows the Python debugger block by block.)
 
 Start from the overview: click **Open ▸** on a section card (or a line in its
 list) to see its blocks, **Collapse ▴** to fold it back, **Overview / All blocks**

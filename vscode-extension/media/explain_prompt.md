@@ -6,15 +6,14 @@ Return ONE JSON object and nothing else (no prose, no code fence), with this sha
   "summary": "2-3 sentences: what the script does end to end, in plain language.",
   "inputs": ["plain-language list of what the script reads: files, tables, env vars, CLI args"],
   "outputs": ["what it writes or returns: files, tables, printed reports"],
-  "sections": { "<section id>": { "summary": "1-2 sentences: what this section produces and why", "narrative": "one paragraph of continuous prose walking a reader through this section's steps in order" } },
+  "sections": { "<section id>": { "summary": "1-2 sentences: what this section produces and why" } },
   "nodes": {
     "<block id>": {
       "summary": "25-60 words, concrete: inputs → output and the decision rule",
       "watch": "optional, max ~25 words: a side effect, edge case or gotcha a reader could miss"
     }
   },
-  "stages": [ { "name": "Classify", "summary": "one sentence", "narrative": "one paragraph of prose for this stage", "nodes": ["<block id>", "..."] } ],
-  "functions": { "<function name>": { "narrative": "one paragraph: how this function gets from its inputs to its result, step by step" } },
+  "stages": [ { "name": "Classify", "summary": "one sentence", "nodes": ["<block id>", "..."] } ],
   "implicit_edges": [ { "source": "<block id>", "target": "<block id>", "label": "short name, e.g. a file name", "reason": "one sentence" } ]
 }
 
@@ -26,8 +25,6 @@ How to write a block summary (this is what readers judge you on):
 - For a block that chooses between branches (if/match), say what decides the branch and what each branch calls.
 - For settings blocks, say what the values control downstream, not just what they are.
 - Describe behaviour that is in the code only. Do not guess at intent that the code does not show.
-
-The narratives feed a "Read" page that explains the script in plain English, step by step. Write them as you would explain the code to a colleague who has not seen it: continuous sentences, in run order, naming the variables and functions as they appear, saying what each step produces and why the next one needs it. 60-150 words each. The reader can also see the per-block notes, so the narrative should connect the steps rather than repeat each note.
 
 Other rules:
 - Use only ids that appear in the BLOCKS and SECTIONS lists. Write a summary for every block, and for every section if a SECTIONS list is given (otherwise "sections" is {}). "watch" is optional; omit it when there is nothing non-obvious.
