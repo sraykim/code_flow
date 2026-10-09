@@ -2,7 +2,7 @@
   "name": "code-flow",
   "displayName": "Code Flow",
   "description": "See a Python script as a map: sections you open into blocks, functions you open into their own flow, branches drawn as forks, with optional explanations from Claude Code.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {

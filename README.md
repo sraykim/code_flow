@@ -43,7 +43,7 @@ Updates: `claude plugin marketplace update code-flow` then `claude plugin update
 
 **VS Code extension**
 ```
-code --install-extension dist/code-flow-0.5.0.vsix
+code --install-extension dist/code-flow-0.5.1.vsix
 ```
 Open a `.py` file → click the Code Flow icon in the editor title bar (or right-click → *Code Flow: Visualize Script*).
 Needs Python 3.8+ (standard library only). For explanations, Claude Code must be installed and signed in;

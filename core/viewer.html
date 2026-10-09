@@ -55,10 +55,14 @@ button { font: inherit; color: inherit; }
   position: absolute; inset: 0 0 auto 0; z-index: 20; display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(6px); border-bottom: 1px solid var(--border);
+  overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: thin;
 }
+.bar > * { flex: none; }
+.bar::-webkit-scrollbar { height: 6px; }
+.bar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .bar .file { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
 .bar .stats { color: var(--muted); font-size: 12px; white-space: nowrap; }
-.bar .spacer { flex: 1; }
+.bar .spacer { flex: 1 0 8px; }
 .btn {
   border: 1px solid var(--border); background: var(--panel); border-radius: 6px;
   padding: 4px 9px; cursor: pointer; white-space: nowrap; font-size: 12px;
@@ -159,7 +163,11 @@ button { font: inherit; color: inherit; }
 .callsite { margin: 0 8px 6px; border-radius: 6px; background: color-mix(in srgb, var(--k-step) 7%, transparent);
   border-left: 2px solid var(--k-step); }
 .callsite .cap { font-size: 10.5px; color: var(--muted); padding: 3px 8px 0; text-transform: uppercase; letter-spacing: .05em; }
-.body { border-top: 1px solid var(--border); max-height: 300px; overflow: auto; border-radius: 0 0 9px 9px; }
+.body { border-top: 1px solid var(--border); max-height: var(--bodyh, 300px); overflow: auto; border-radius: 0 0 9px 9px; }
+.node .rz { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; opacity: .5;
+  background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 75%, var(--muted) 75%, var(--muted) 85%, transparent 85%); border-radius: 0 0 8px 0; }
+.node .rz:hover { opacity: 1; }
+.node.collapsed .rz { display: none; }
 .node.full .body { max-height: none; }
 .node.collapsed .body, .node.collapsed .callsite .code-more { display: none; }
 pre.code { margin: 0; padding: 6px 0; font: 12px/1.55 var(--mono); tab-size: 4; }
@@ -322,6 +330,7 @@ body.reading #b-fit, body.reading #seg-level, body.reading .seg[aria-label="Layo
   <span class="stats" id="stats"></span>
   <span class="status" id="status"></span>
   <span class="spacer"></span>
+  <button class="btn primary" id="b-explain" hidden title="Ask Claude Code for summaries, sections and hidden dependencies">✦ Explain with Claude</button>
   <span class="seg" role="group" aria-label="View" id="seg-tab">
     <button class="btn" data-tab="map" aria-pressed="true">Map</button>
     <button class="btn" data-tab="read" aria-pressed="false" title="Plain-English walkthrough (R)">Read</button>
@@ -338,7 +347,6 @@ body.reading #b-fit, body.reading #seg-level, body.reading .seg[aria-label="Layo
   </span>
   <button class="btn" id="b-tidy" title="Re-run automatic layout">Tidy</button>
   <button class="btn" id="b-view" aria-haspopup="true" aria-expanded="false">View ▾</button>
-  <button class="btn primary" id="b-explain" hidden title="Ask Claude Code for summaries, sections and hidden dependencies">✦ Explain with Claude</button>
 </div>
 <div class="menu" id="menu" hidden role="menu">
   <button class="mi" id="m-globals" role="menuitemcheckbox"><span class="ck"></span>Show global reads as arrows</button>
@@ -389,7 +397,7 @@ let els = new Map(), cards = new Map(), frames = new Map();
 let ROOT = [];                        // root container ids (sections)
 let dir = OPTIONS.direction === "TB" ? "TB" : "LR";   // left-to-right unless told otherwise
 let groupMode = "comments", activeMode = "flat", showLookups = false, showGlobals = false, foldCode = false, wheelZooms = false;
-let store = { TB: { top: {}, inner: {} }, LR: { top: {}, inner: {} } };
+let store = { TB: { top: {}, inner: {} }, LR: { top: {}, inner: {} }, size: {} };
 let savedOpen = null;
 let view = { x: 40, y: 70, k: 1 };
 let selected = null, overviewClosed = false;
@@ -409,7 +417,7 @@ const savedState = () => ({
   v: 4, dir, groupMode, showLookups, showGlobals, foldCode, wheelZooms, tab,
   open: [...open].map((id) => CONT.get(id).key),
   grouped: [...CONT.values()].some((c) => c.kind === "section" && !c.synthetic),
-  TB: store.TB, LR: store.LR,
+  TB: store.TB, LR: store.LR, size: store.size || {},
 });
 let saveTimer = 0;
 function save() {
@@ -717,8 +725,10 @@ function makeNodeEl(n) {
   // Blocks inside an opened function start folded, so a flow reads as steps first.
   el.className = `node k-${n.kind}` + (foldCode || n.inFlow ? " collapsed" : "") + (n.returns ? " ret" : "");
   el.dataset.id = n.id;
-  el.style.width = (WIDTH[n.kind] || 420) + "px";
-  el.innerHTML = nodeHTML(n);
+  const sz = (store.size || {})[keyOf.get(n.id)];
+  el.style.width = (sz && sz.w ? sz.w : WIDTH[n.kind] || 420) + "px";
+  if (sz && sz.h) el.style.setProperty("--bodyh", sz.h + "px");
+  el.innerHTML = nodeHTML(n) + (n.kind === "branch" || n.kind === "input" ? "" : `<div class="rz" title="Drag to resize"></div>`);
   $("nodes").appendChild(el); els.set(n.id, el); observe(el);
   return el;
 }
@@ -944,6 +954,29 @@ const visChildren = (C) => CONT.get(C).children.map((id) => openFlowOf.get(id) |
 const closedSection = (id) => isCont(id) && CONT.get(id).kind === "section" && !open.has(id);
 const sizeOfItem = (id) => (closedSection(id) ? elSize(cards.get(id)) : isCont(id) ? sizeCache.get(id) : elSize(els.get(id)));
 // Lay out one container's children (recursively), return its outer size.
+// Push boxes apart so none overlap, keeping their order. Runs after every layout
+// pass, so a block that grew (Claude's notes arrived, fonts loaded, the user
+// resized it) moves its neighbours instead of covering them.
+function resolveOverlaps(items, posOf, sizeOf, setPos) {
+  const H = dir === "LR", GAP = H ? 36 : 28;
+  const order = items.slice().sort((a, b) => (H ? posOf(a).x - posOf(b).x : posOf(a).y - posOf(b).y) || (H ? posOf(a).y - posOf(b).y : posOf(a).x - posOf(b).x));
+  for (let pass = 0; pass < 4; pass++) {
+    let moved = false;
+    for (let i = 0; i < order.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const a = order[j], b = order[i], pa = posOf(a), pb = posOf(b), za = sizeOf(a), zb = sizeOf(b);
+        const ox = Math.min(pa.x + za.w, pb.x + zb.w) - Math.max(pa.x, pb.x);
+        const oy = Math.min(pa.y + za.h, pb.y + zb.h) - Math.max(pa.y, pb.y);
+        if (ox <= 0 || oy <= 0) continue;
+        // Move the later box along whichever axis needs the smaller shift.
+        const dx = pa.x + za.w + GAP - pb.x, dy = pa.y + za.h + GAP - pb.y;
+        if (dy <= dx) setPos(b, { x: pb.x, y: pb.y + dy }); else setPos(b, { x: pb.x + dx, y: pb.y });
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+}
 function layoutContainer(C, force) {
   const kids = visChildren(C), inner = P().inner;
   for (const k of kids) if (isCont(k)) layoutContainer(k, force);
@@ -952,6 +985,7 @@ function layoutContainer(C, force) {
     const minX = Math.min(...kids.map((k) => pos[k].x)), minY = Math.min(...kids.map((k) => pos[k].y));
     for (const k of kids) inner[keyOf.get(k)] = { x: pos[k].x - minX, y: pos[k].y - minY };
   }
+  resolveOverlaps(kids, (k) => inner[keyOf.get(k)], sizeOfItem, (k, p) => { inner[keyOf.get(k)] = p; });
   const ch = chromeOf(CONT.get(C));
   let x1 = 0, y1 = 0;
   for (const k of kids) { const r = inner[keyOf.get(k)], z = sizeOfItem(k); x1 = Math.max(x1, r.x + z.w); y1 = Math.max(y1, r.y + z.h); }
@@ -971,6 +1005,7 @@ function layoutRoot(force) {
     const pos = layered(items, sizeOf, aggregate(allLeafEdges(false), (x) => liftTo(x, null)));
     for (const cid of items) tops[CONT.get(cid).key] = pos[cid];
   }
+  resolveOverlaps(items, (cid) => tops[CONT.get(cid).key], sizeOf, (cid, p) => { tops[CONT.get(cid).key] = p; });
 }
 function layoutAll(force) { layoutRoot(force); }
 // Absolute boxes
@@ -1206,6 +1241,12 @@ function setupInteraction() {
     if (ev.button !== 0) return;
     if (ev.target.closest("button, a, input, li, .chip, .t-local")) return;
     const nodeEl = ev.target.closest(".node"), cardEl = ev.target.closest(".card"), frameHead = ev.target.closest(".frame .fh");
+    if (nodeEl && ev.target.closest(".rz")) {
+      const body = nodeEl.querySelector(".body");
+      drag = { type: "resize", id: nodeEl.dataset.id, k: keyOf.get(nodeEl.dataset.id), sx: ev.clientX, sy: ev.clientY,
+               ow: nodeEl.offsetWidth, oh: body ? body.offsetHeight : 0, el: nodeEl, body, moved: false };
+      vp.setPointerCapture(ev.pointerId); ev.preventDefault(); return;
+    }
     if (nodeEl && ev.target.closest(".nh")) {
       const id = nodeEl.dataset.id, k = keyOf.get(id), r = P().inner[k] || { x: 0, y: 0 };
       drag = { type: "inner", id, k, sx: ev.clientX, sy: ev.clientY, ox: r.x, oy: r.y, moved: false, el: nodeEl };
@@ -1228,6 +1269,14 @@ function setupInteraction() {
     const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy;
     if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
     const nx = Math.round(drag.ox + dx / view.k), ny = Math.round(drag.oy + dy / view.k);
+    if (drag.type === "resize") {
+      const w = Math.max(260, Math.round(drag.ow + dx / view.k));
+      drag.el.style.width = w + "px";
+      let h = null;
+      if (drag.body) { h = Math.max(60, Math.round(drag.oh + dy / view.k)); drag.el.style.setProperty("--bodyh", h + "px"); }
+      (store.size ||= {})[drag.k] = { w, h };
+      redraw(); return;
+    }
     if (drag.type === "inner") { P().inner[drag.k] = { x: nx, y: ny }; redraw(); }
     else if (drag.type === "top") { (P().top[sig()] ||= {})[drag.k] = { x: nx, y: ny }; redraw(); }
     else { view.x = drag.ox + dx; view.y = drag.oy + dy; applyView(); }
@@ -1236,6 +1285,7 @@ function setupInteraction() {
     if (!drag) return;
     if (drag.el) drag.el.classList.remove("dragging");
     if (drag.type === "pan") { vp.classList.remove("panning"); if (!drag.moved) select(null); }
+    else if (drag.type === "resize") save();
     else if (drag.moved) save();
     else select(selected === drag.id ? null : drag.id);
     drag = null;
@@ -1569,7 +1619,7 @@ function load(graph, enrich, keepView) {
       dir = saved.dir === "TB" ? "TB" : "LR";
       groupMode = saved.groupMode || "comments"; showLookups = !!saved.showLookups; showGlobals = !!saved.showGlobals;
       foldCode = !!saved.foldCode; wheelZooms = !!saved.wheelZooms; tab = saved.tab === "read" ? "read" : "map";
-      store = { TB: saved.TB || { top: {}, inner: {} }, LR: saved.LR || { top: {}, inner: {} } };
+      store = { TB: saved.TB || { top: {}, inner: {} }, LR: saved.LR || { top: {}, inner: {} }, size: saved.size || {} };
       savedOpen = saved.grouped ? saved.open || [] : null;   // a flat map saved nothing worth restoring
     }
   }
