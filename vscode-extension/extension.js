@@ -20,6 +20,12 @@ function activate(context) {
       await openFlow(context, vscode.Uri.file(file));
       explain(context, file);
     }),
+    vscode.commands.registerCommand("codeFlow.export", async (uri) => {
+      const file = resolveFile(uri);
+      if (!file) return;
+      await openFlow(context, vscode.Uri.file(file));
+      post(panels.get(file), { type: "exportRequest" });
+    }),
     vscode.commands.registerCommand("codeFlow.chat", async (uri) => {
       const file = resolveFile(uri);
       if (!file) return;
@@ -141,6 +147,32 @@ async function onMessage(context, st, m) {
   else if (m.type === "chatStop") { if (st.chat && st.chat.child) st.chat.child.kill(); }
   else if (m.type === "chatReset") { if (st.chat && st.chat.child) st.chat.child.kill(); st.chat = null; }
   else if (m.type === "trace") setTrace(st, !!m.on, m.lines || []);
+  else if (m.type === "export") exportHtml(context, st, m.positions);
+}
+
+// ------------------------------------------------------------------ export
+async function exportHtml(context, st, positions) {
+  if (!st.graph || st.graph.error) { vscode.window.showWarningMessage("Code Flow: nothing to export until the script parses."); return; }
+  const base = path.basename(st.file, ".py");
+  const target = await vscode.window.showSaveDialog({
+    defaultUri: vscode.Uri.file(path.join(path.dirname(st.file), base + ".flow.html")),
+    filters: { "HTML page": ["html"] },
+    title: "Export Code Flow map",
+  });
+  if (!target) return;
+  const nonce = crypto.randomBytes(16).toString("hex");
+  let html = fs.readFileSync(path.join(context.extensionPath, "media", "viewer.html"), "utf8");
+  html = html
+    .replace("<!--__CF_CSP__-->", "")
+    .replace("/*__CODEFLOW_GRAPH__*/null", () => toJs(st.graph))
+    .replace("/*__CODEFLOW_ENRICH__*/null", () => { const e = savedEnrichment(context, st); return e ? toJs(e) : "null"; })
+    .replace("/*__CODEFLOW_POSITIONS__*/null", () => (positions ? toJs(positions) : "null"))
+    .replace("/*__CODEFLOW_OPTIONS__*/null", () => toJs({ direction: positions && positions.dir === "TB" ? "TB" : "LR" }))
+    .split("__CF_NONCE__").join(nonce);
+  fs.writeFileSync(target.fsPath, html, "utf8");
+  const open = await vscode.window.showInformationMessage(`Code Flow: exported ${path.basename(target.fsPath)}`, "Open in browser", "Reveal in Finder/Explorer");
+  if (open === "Open in browser") vscode.env.openExternal(target);
+  else if (open) vscode.commands.executeCommand("revealFileInOS", target);
 }
 
 async function reveal(file, line, end) {
@@ -282,6 +314,7 @@ function cleanEnrichment(raw, graph) {
   for (const [id, v] of Object.entries(raw.nodes || {})) {
     if (ids.has(id) && v && typeof v.summary === "string") {
       out.nodes[id] = { summary: v.summary };
+      if (["key", "support", "minor"].includes(v.role)) out.nodes[id].role = v.role;
       if (typeof v.watch === "string" && v.watch.trim()) out.nodes[id].watch = v.watch.trim();
     }
   }

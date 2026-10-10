@@ -25,13 +25,103 @@ import re
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 BUILTIN_NAMES = set(dir(builtins))
 
 
 # --------------------------------------------------------------------------
 # Name collection
 # --------------------------------------------------------------------------
+
+# ---------- block importance (a human-reading heuristic, not an AST one) ----------
+SIDE_FUNCS = {"print", "pprint", "warn", "warning", "info", "debug", "error", "exception", "critical", "log",
+              "setLevel", "basicConfig", "display", "echo", "secho", "describe", "head", "tail", "show"}
+SIDE_OBJECTS = {"logger", "log", "logging", "warnings", "console", "st", "click", "typer"}
+WRITE_METHODS = {"to_csv", "to_parquet", "to_excel", "to_json", "to_pickle", "to_sql", "to_feather", "to_hdf",
+                 "write_parquet", "write_csv", "write_json", "write_ipc", "write_excel", "write_database", "write_delta",
+                 "savefig", "save", "save_pretrained", "dump", "write", "writelines", "write_text", "write_bytes",
+                 "put", "upload_file", "upload_fileobj", "commit", "executemany", "insert_many", "to_gbq", "copy_to"}
+
+
+def _side_stmt(st) -> bool:
+    """True for statements a reader skims past: prints, logging, asserts, raises, guards that only do those."""
+    if isinstance(st, (ast.Pass, ast.Continue, ast.Break, ast.Raise, ast.Assert)):
+        return True
+    if isinstance(st, ast.Return) and st.value is None:
+        return True
+    if isinstance(st, ast.Expr):
+        v = st.value
+        if isinstance(v, ast.Await):
+            v = v.value
+        if isinstance(v, ast.Call):
+            f = v.func
+            if isinstance(f, ast.Name):
+                return f.id in SIDE_FUNCS
+            if isinstance(f, ast.Attribute):
+                base = f.value
+                while isinstance(base, ast.Attribute):
+                    base = base.value
+                return f.attr in SIDE_FUNCS or (isinstance(base, ast.Name) and base.id in SIDE_OBJECTS)
+        return isinstance(v, ast.Constant)  # a stray docstring / string literal
+    if isinstance(st, ast.If):
+        return all(_side_stmt(x) for x in st.body + st.orelse)
+    if isinstance(st, ast.Try):
+        return (all(_side_stmt(x) for x in st.body + st.orelse + st.finalbody)
+                and all(_side_stmt(x) for h in st.handlers for x in h.body))
+    if isinstance(st, ast.With):
+        return all(_side_stmt(x) for x in st.body)
+    return False
+
+
+def _writes_file(stmts) -> bool:
+    for st in stmts:
+        for x in ast.walk(st):
+            if isinstance(x, ast.Call):
+                f = x.func
+                if isinstance(f, ast.Attribute) and f.attr in WRITE_METHODS:
+                    return True
+                if isinstance(f, ast.Name) and f.id == "open":
+                    for a in x.args[1:2] + [k.value for k in x.keywords if k.arg == "mode"]:
+                        if isinstance(a, ast.Constant) and isinstance(a.value, str) and any(c in a.value for c in "wax"):
+                            return True
+    return False
+
+
+def assign_roles(nodes, edges):
+    """key: changes the data (a local-function step, a branch, a block whose result feeds several
+    others, is returned, or is written out). minor: guards, logging, counters nobody reads.
+    support: everything else. Claude may override these in its enrichment."""
+    consumers = {}
+    for e in edges:
+        if e["kind"] in ("data", "global", "branch"):
+            consumers.setdefault(e["source"], set()).add(e["target"])
+    for n in nodes:
+        k = n["kind"]
+        writes_file = n.pop("_writes_file", False)
+        side_only = n.pop("_side_only", False)
+        if k == "step":
+            role = "key"
+        elif k == "branch":
+            role = "key" if len(n.get("arms") or []) >= 2 else "support"   # a lone guard is not a decision
+        elif k == "unused":
+            role = "minor"
+        elif k in ("helper", "value", "input"):
+            role = "support"
+        elif writes_file:
+            role = "key"
+        elif side_only:
+            role = "minor"
+        else:
+            used = len(consumers.get(n["id"], ()))
+            if n.get("returns") or used >= 2:
+                role = "key"
+            elif used == 0:
+                role = "minor"
+            else:
+                role = "support"
+        n["role"] = role
+
+
 class NameCollector(ast.NodeVisitor):
     """Collect variable names read and written by an expression/statement.
 
@@ -555,6 +645,8 @@ class GraphBuilder:
         }
         if any(isinstance(x, ast.Return) for st in stmts for x in ast.walk(st)):
             node["returns"] = True
+        node["_side_only"] = all(_side_stmt(st) for st in stmts)
+        node["_writes_file"] = _writes_file(stmts)
         self.register(node)
         self.link_reads(nid, node["reads"])
         self.set_writes(nid, node["writes"])
@@ -828,6 +920,7 @@ class GraphBuilder:
             self.flush()
             self.mark_lookups(config_params=config)
             nodes, edges, lookups = self.nodes, list(self.edges.values()), self.lookups
+            assign_roles(nodes, edges)
         finally:
             (self.nodes, self.edges, self.writers, self.pending, self._counter, self.arms, self.in_flow) = saved
         real = [n for n in nodes if n["kind"] != "input"]
@@ -919,6 +1012,7 @@ class GraphBuilder:
         self.add_helpers()
         self.mark_lookups()
         self.retitle()
+        assign_roles(self.nodes, list(self.edges.values()))
         flows = self.build_flows()
         defs_out = {
             name: {k: v for k, v in d.items() if k not in ("node", "used_at_top", "used_inside_code")}
@@ -964,6 +1058,7 @@ def brief(graph: dict) -> str:
         for key in ("reads", "global_reads", "writes"):
             if n.get(key):
                 bits.append(f"{key}={','.join(n[key])}")
+        bits.append(f"role?={n.get('role', 'support')}")
         out.append("  " + " | ".join(bits))
     if graph.get("sections"):
         out += ["", "SECTIONS (from the script's banner comments):"]
@@ -971,6 +1066,9 @@ def brief(graph: dict) -> str:
             out.append(f"  {sec['id']} | {sec['title']!r} | lines {sec['lines'][0]}-{sec['lines'][1]} | blocks {','.join(sec['nodes'])}")
     if graph.get("lookups"):
         out += ["", "LOOKUPS (shown as tags, not arrows): " + ", ".join(l["name"] for l in graph["lookups"])]
+    flows = graph.get("flows") or {}
+    n_flow = sum(1 for f in flows.values() for n in f["nodes"] if n["kind"] != "input")
+    out.append(f"\nNODE COUNT: {len(graph['nodes'])} blocks" + (f" + {n_flow} function-flow blocks = {len(graph['nodes']) + n_flow} ids to cover" if n_flow else ""))
     out += ["", "EDGES (source -> target: variables):"]
     for e in graph["edges"]:
         out.append(f"  {e['source']} -> {e['target']} [{e['kind']}]: {', '.join(e['vars'])}")
@@ -990,6 +1088,7 @@ def brief(graph: dict) -> str:
                         bits.append(f"{key}={','.join(n[key])}")
                 if n.get("returns"):
                     bits.append("returns")
+                bits.append(f"role?={n.get('role', 'support')}")
                 out.append("    " + " | ".join(bits))
     return "\n".join(out)
 

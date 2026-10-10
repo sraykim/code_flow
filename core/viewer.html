@@ -50,6 +50,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: var(--bg); color: var(--fg); font: 13px/1.4 var(--ui); }
 button { font: inherit; color: inherit; }
 
+/* ---------- block roles ---------- */
+.node.r-minor { opacity: .72; width: 360px; }
+.node.r-minor:hover, .node.r-minor.sel, .node.r-minor.dbg-now, .node.r-minor.dbg-seen { opacity: 1; }
+.node.r-minor .nh .title { font-weight: 500; color: var(--muted); }
+.node.r-minor.collapsed .io, .node.r-minor.collapsed .note, .node.r-minor.collapsed .arm { display: none; }
+.node.r-minor .sum { font-size: 11.5px; color: var(--muted); margin-top: -2px; }
+.node.r-minor .sum::before { content: ""; }
+.node.r-minor .badge::after { content: " · minor"; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.node.r-support .nh .title { font-weight: 500; }
+.frame .fh .hid, .card .hid { font: 11px var(--ui); color: var(--muted); margin-left: 8px; }
+.frame .fh .hid:empty, .card .hid:empty { display: none; }
+
 /* ---------- chat ---------- */
 #chat { position: absolute; top: 44px; right: 0; bottom: 0; width: var(--chatw, 420px); max-width: 100%; z-index: 17; display: flex; flex-direction: column;
   background: var(--panel); border-left: 1px solid var(--border); }
@@ -341,6 +353,7 @@ body.vscode-dark, body.vscode-high-contrast { --k-sec: #4fb6c9; }
   <span class="spacer"></span>
   <button class="btn primary" id="b-explain" hidden title="Ask Claude Code for summaries, sections and hidden dependencies">✦ Explain with Claude</button>
   <button class="btn primary" id="b-chat" hidden aria-pressed="false" title="Chat with Claude about this script (C)">💬 Chat</button>
+  <button class="btn" id="b-export" hidden title="Save this map as a standalone HTML file you can open anywhere or share">Export HTML</button>
   <button class="btn" id="b-trace" hidden aria-pressed="false" title="Debugger: stop at the start of every block, so Continue walks the map block by block">⏺ Trace</button>
   <input class="search" id="search" type="search" placeholder="Find (/)" aria-label="Find a block">
   <button class="btn" id="b-fit" title="Fit to screen (F)">Fit</button>
@@ -360,6 +373,7 @@ body.vscode-dark, body.vscode-high-contrast { --k-sec: #4fb6c9; }
   <button class="mi" id="m-lookups" role="menuitemcheckbox"><span class="ck"></span>Show lookups as arrows</button>
   <button class="mi" id="m-wheel" role="menuitemcheckbox"><span class="ck"></span>Scroll wheel zooms (instead of pans)</button>
   <button class="mi" id="m-fold" role="menuitemcheckbox"><span class="ck"></span>Fold code in blocks</button>
+  <button class="mi" id="m-minor" role="menuitemcheckbox" title="Guards, asserts, logging, prints and counters nobody reads (M)"><span class="ck"></span>Hide minor blocks</button>
   <div class="sep"></div>
   <div class="lbl">Group sections by</div>
   <button class="mi" id="m-g-comments" role="menuitemradio"><span class="ck"></span>Banner comments in the script</button>
@@ -410,6 +424,8 @@ let els = new Map(), cards = new Map(), frames = new Map();
 let ROOT = [];                        // root container ids (sections)
 let dir = OPTIONS.direction === "TB" ? "TB" : "LR";   // left-to-right unless told otherwise
 let groupMode = "comments", activeMode = "flat", showLookups = false, showGlobals = false, foldCode = false, wheelZooms = false;
+let hideMinor = true;                 // minor blocks (guards, logging) start hidden; View ▾ or M shows them
+let shownMinor = new Set();           // minor blocks the reader asked for anyway (search, chat link, debugger)
 let store = { TB: { top: {}, inner: {} }, LR: { top: {}, inner: {} }, size: {} };
 let savedOpen = null;
 let view = { x: 40, y: 70, k: 1 };
@@ -421,12 +437,16 @@ const storeKey = () => (G ? "codeflow:" + G.file : "codeflow");
 function loadSaved() {
   let raw = null;
   if (vscodeApi) raw = (vscodeApi.getState() || {}).positions || window.__CF_POSITIONS__;
-  else { try { raw = JSON.parse(localStorage.getItem(storeKey()) || "null"); } catch { raw = null; } }
+  else {
+    try { raw = JSON.parse(localStorage.getItem(storeKey()) || "null"); } catch { raw = null; }
+    const baked = window.__CF_POSITIONS__;
+    if (baked && (!raw || (baked.exported && baked.exported !== raw.exported))) raw = baked;   // an exported page opens as it was exported
+  }
   if (!raw || raw.v !== 4) return null;   // layouts from older versions are not reused
   return raw;
 }
 const savedState = () => ({
-  v: 4, dir, groupMode, showLookups, showGlobals, foldCode, wheelZooms, chat: chatOpen,
+  v: 4, dir, groupMode, showLookups, showGlobals, foldCode, wheelZooms, chat: chatOpen, hideMinor, exported: (window.__CF_POSITIONS__ || {}).exported,
   open: [...open].map((id) => CONT.get(id).key),
   grouped: [...CONT.values()].some((c) => c.kind === "section" && !c.synthetic),
   TB: store.TB, LR: store.LR, size: store.size || {},
@@ -508,6 +528,10 @@ function varLabel(vars, max = 2) {
 // Enrichment lookup: root blocks by id, flow blocks by "<function>/<id>".
 const noteKey = (n) => (n.flowName ? n.flowName + "/" + n.innerId : n.id);
 const noteOf = (n) => (E && E.nodes && E.nodes[noteKey(n)]) || null;
+const ROLES = new Set(["key", "support", "minor"]);
+function roleOf(n) { const en = noteOf(n); return en && ROLES.has(en.role) ? en.role : ROLES.has(n.role) ? n.role : "support"; }
+// A minor block is hidden when "Hide minor blocks" is on, unless the reader asked for it or it was opened as a flow.
+const isHidden = (id) => hideMinor && NODES.has(id) && roleOf(NODES.get(id)) === "minor" && !shownMinor.has(id) && !openFlowOf.has(id);
 
 // ---------------------------------------------------------------- tree
 function addLeaf(node, parent, key) {
@@ -579,7 +603,22 @@ function allLeafEdges(all) {
     if (c.kind !== "flow") continue;
     for (const e of c.flow.edges) if (keep(e)) out.push({ ...e, source: c.id + "/" + e.source, target: c.id + "/" + e.target });
   }
-  return out;
+  return hideMinor ? bypassHidden(out) : out;
+}
+// Route arrows around hidden minor blocks: a -> (minor) -> b becomes a -> b carrying b's variables.
+function bypassHidden(edges) {
+  let cur = edges;
+  for (const id of NODES.keys()) {
+    if (!isHidden(id)) continue;
+    const ins = cur.filter((e) => e.target === id), outs = cur.filter((e) => e.source === id);
+    const rest = cur.filter((e) => e.source !== id && e.target !== id);
+    for (const a of ins) for (const b of outs) {
+      if (a.source === b.target || a.kind === "branch" && b.kind === "branch") continue;
+      rest.push({ ...b, source: a.source, kind: b.kind === "branch" ? a.kind : b.kind, reason: `via ${NODES.get(id).title}` });
+    }
+    cur = rest;
+  }
+  return cur;
 }
 function aggregate(edges, mapId) {
   const m = new Map();
@@ -735,10 +774,11 @@ function nodeHTML(n) {
 function makeNodeEl(n) {
   const el = document.createElement("div");
   // Blocks inside an opened function start folded, so a flow reads as steps first.
-  el.className = `node k-${n.kind}` + (foldCode || n.inFlow ? " collapsed" : "") + (n.returns ? " ret" : "");
+  const role = roleOf(n);
+  el.className = `node k-${n.kind} r-${role}` + (foldCode || role !== "key" ? " collapsed" : "") + (n.returns ? " ret" : "");
   el.dataset.id = n.id;
   const sz = (store.size || {})[keyOf.get(n.id)];
-  el.style.width = (sz && sz.w ? sz.w : WIDTH[n.kind] || 420) + "px";
+  el.style.width = (sz && sz.w ? sz.w : role === "minor" ? 360 : WIDTH[n.kind] || 420) + "px";
   if (sz && sz.h) el.style.setProperty("--bodyh", sz.h + "px");
   el.innerHTML = nodeHTML(n) + (n.kind === "branch" || n.kind === "input" ? "" : `<div class="rz" title="Drag to resize"></div>`);
   $("nodes").appendChild(el); els.set(n.id, el); observe(el);
@@ -749,7 +789,7 @@ function cardHTML(s) {
   const steps = s.children.filter((id) => NODES.get(id).kind === "step").length;
   let h = `<div class="nh"><span class="badge">§</span><span class="title">${esc(cap(s.title))}</span><span class="grow"></span>`;
   h += `<span class="lines">L${s.lines[0]}–${s.lines[1]}</span><button class="ibtn open" title="Show this section's blocks">Open ▸</button></div>`;
-  h += `<div class="meta">${s.children.length} block${s.children.length === 1 ? "" : "s"}${steps ? ` · ${steps} function call${steps === 1 ? "" : "s"}` : ""}</div>`;
+  h += `<div class="meta">${s.children.length} block${s.children.length === 1 ? "" : "s"}${steps ? ` · ${steps} function call${steps === 1 ? "" : "s"}` : ""}<span class="hid"></span></div>`;
   if (s.summary) h += `<div class="sum">${esc(s.summary)}</div>`;
   const io2 = [chipsHTML("in", io.ins, "", "data-in", 5), chipsHTML("out", io.outs, "", "data-out", 5)].filter(Boolean);
   if (io2.length) h += `<div class="io">${io2.join('<span class="sep"></span>')}</div>`;
@@ -766,15 +806,15 @@ function cardHTML(s) {
 function frameHTML(c) {
   if (c.kind === "entry") {
     return `<div class="fh"><span class="badge">main</span><span class="title">${esc(c.title)}()</span><span class="sig">the program: this function's body is the pipeline</span>` +
-      `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="grow"></span></div>`;
+      `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="hid"></span><span class="grow"></span></div>`;
   }
   if (c.kind === "flow") {
     return `<div class="fh"><span class="badge">ƒ</span><span class="title">${esc(c.title)}</span><span class="sig">(${esc(c.params.join(", "))})</span>` +
-      `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="grow"></span>` +
+      `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="hid"></span><span class="grow"></span>` +
       `<button class="ibtn collapse" title="Back to the single block">Collapse ▴</button></div>`;
   }
   return `<div class="fh"><span class="badge">§</span><span class="title">${esc(cap(c.title))}</span>` +
-    `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="grow"></span>` +
+    `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="hid"></span><span class="grow"></span>` +
     `<button class="ibtn collapse" title="Back to the section card">Collapse ▴</button></div>`;
 }
 function makeFrameEl(c) {
@@ -877,7 +917,12 @@ function buildDrawer() {
     `<h3><span>Imports (${G.imports.length})</span></h3><section>${G.imports.map((i) => highlight(i.code, i.line)).join("") || `<p class="hint">No imports.</p>`}</section>`;
 }
 function applyVisibility() {
-  for (const [id, el] of els) el.hidden = visId(id) !== id;
+  for (const [id, el] of els) el.hidden = visId(id) !== id || isHidden(id);
+  for (const c of CONT.values()) {
+    const n = c.children.filter(isHidden).length, host = frames.get(c.id) || cards.get(c.id);
+    const tag = host && host.querySelector(".hid");
+    if (tag) tag.textContent = n ? `${n} minor hidden` : "";
+  }
   for (const [cid, c] of cards) c.hidden = open.has(cid) || visId(cid) !== cid;
   for (const [cid, f] of frames) f.hidden = !(open.has(cid) && visId(cid) === cid);
 }
@@ -889,7 +934,7 @@ function syncControls() {
     b.setAttribute("aria-pressed", String(b.dataset.level === "overview" ? nOpen === 0 : nOpen === real.length && real.length > 0)));
   document.querySelectorAll(".seg [data-dir]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.dir === dir)));
   const ck = (id, on) => { $(id).querySelector(".ck").textContent = on ? "✓" : ""; $(id).setAttribute("aria-checked", String(!!on)); };
-  ck("m-lookups", showLookups); ck("m-globals", showGlobals); ck("m-fold", foldCode); ck("m-wheel", wheelZooms);
+  ck("m-lookups", showLookups); ck("m-globals", showGlobals); ck("m-fold", foldCode); ck("m-wheel", wheelZooms); ck("m-minor", hideMinor);
   ck("m-g-comments", activeMode === "comments"); ck("m-g-claude", activeMode === "claude");
   $("m-g-comments").disabled = !(G && G.sections && G.sections.length >= 2);
   $("m-g-claude").disabled = !(E && Array.isArray(E.stages) && E.stages.length);
@@ -961,7 +1006,7 @@ function layered(order, sizeOf, edges) {
   return out;
 }
 // Visible children of a container: blocks, or the flow container that replaced a block.
-const visChildren = (C) => CONT.get(C).children.map((id) => openFlowOf.get(id) || id);
+const visChildren = (C) => CONT.get(C).children.filter((id) => !isHidden(id)).map((id) => openFlowOf.get(id) || id);
 const closedSection = (id) => isCont(id) && CONT.get(id).kind === "section" && !open.has(id);
 const sizeOfItem = (id) => (closedSection(id) ? elSize(cards.get(id)) : isCont(id) ? sizeCache.get(id) : elSize(els.get(id)));
 // Lay out one container's children (recursively), return its outer size.
@@ -1187,6 +1232,7 @@ function showOpened(b) {
 // Reveal a block or container: open every closed section above it, then centre it.
 function focusNode(id) {
   let p = parentOf.get(id), changed = false;
+  if (isHidden(id)) { shownMinor.add(id); changed = true; }
   while (p) { if (!open.has(p)) { open.add(p); changed = true; } p = parentOf.get(p); }
   if (changed) refresh();
   requestAnimationFrame(() => { centerOn(box(openFlowOf.get(id) || id)); select(openFlowOf.get(id) || id); });
@@ -1397,6 +1443,7 @@ function setupToolbar() {
   $("m-lookups").onclick = () => { showLookups = !showLookups; rebuild(); };
   $("m-globals").onclick = () => { showGlobals = !showGlobals; rebuild(); };
   $("m-wheel").onclick = () => { wheelZooms = !wheelZooms; syncControls(); save(); };
+  $("m-minor").onclick = () => setHideMinor(!hideMinor);
   $("m-fold").onclick = () => { foldCode = !foldCode; for (const el of els.values()) el.classList.toggle("collapsed", foldCode); syncControls(); save(); };
   $("m-g-comments").onclick = () => setGroup("comments");
   $("m-g-claude").onclick = () => setGroup("claude");
@@ -1433,11 +1480,15 @@ function setupToolbar() {
     else if (ev.key === "+" || ev.key === "=") { const r = $("viewport").getBoundingClientRect(); zoomAt(1.2, r.width / 2, r.height / 2); }
     else if (ev.key === "-" || ev.key === "_") { const r = $("viewport").getBoundingClientRect(); zoomAt(1 / 1.2, r.width / 2, r.height / 2); }
     else if (ev.key === "c" || ev.key === "C") { if (vscodeApi) setChat(!chatOpen); }
+    else if (ev.key === "m" || ev.key === "M") setHideMinor(!hideMinor);
     else if (ev.key === "o" || ev.key === "O") setLevel("overview");
     else if (ev.key === "a" || ev.key === "A") setLevel("all");
     else if (ev.key === "Escape") { select(null); closeMenu(); }
   });
-  if (vscodeApi) { $("b-explain").hidden = false; $("b-explain").onclick = () => vscodeApi.postMessage({ type: "explain" }); }
+  if (vscodeApi) {
+    $("b-explain").hidden = false; $("b-explain").onclick = () => vscodeApi.postMessage({ type: "explain" });
+    $("b-export").hidden = false; $("b-export").onclick = () => vscodeApi.postMessage({ type: "export", positions: { ...savedState(), chat: false, exported: Date.now() } });
+  }
   const kinds = [["step", "main(): the program"], ["sec", "section (Open ▸)"], ["helper", "function (Open flow ▸)"], ["step", "function call"], ["code", "top-level code"], ["value", "settings / inputs"], ["control", "branch: one arm runs"]];
   const lines = [["--edge", "variable passed on", ""], ["--k-control", "branch arm", ""], ["--k-helper", "calls helper", "2 4"], ["--implicit", "Claude: hidden link", "7 4"],
                  ["--edge", "global read (View ▾ to show)", "5 4"], ["--focus", "direct link of the selected block", ""], ["--k-value", "debugger: path taken", ""]];
@@ -1445,8 +1496,13 @@ function setupToolbar() {
   $("legend").innerHTML = kinds.map(([k, l]) => `<span class="it" data-k="${k}"><span class="sw"></span>${l}</span>`).join("") +
     `<span class="it"><span class="chip lk">NAME</span>lookup: tag, no arrow</span>` +
     lines.map(([c, l, dash]) => `<span class="it">${sw(c, dash)}${l}</span>`).join("") +
+    `<span class="it hint">blocks: ✦ key drawn in full · support folded · minor (guards, logging) hidden — View ▾ or M to show</span>` +
     `<span class="it hint">scroll: pan · ⌘/ctrl+scroll or pinch: zoom · click a block: its lineage stays, the rest fades · Esc: clear</span>`;
   document.querySelectorAll(".legend [data-k]").forEach((el) => el.style.setProperty("--kc", `var(--k-${el.dataset.k})`));
+}
+function setHideMinor(on) {
+  hideMinor = !!on; shownMinor.clear(); selected = null;
+  syncControls(); applyVisibility(); layoutAll(true); place(); drawEdges(); select(null); save();
 }
 function setDir(d) {
   if (d === dir || !G) return;
@@ -1645,7 +1701,9 @@ function debugStop(m) {
   DBG.active = true; DBG.line = frames[0] ? frames[0].line : 0;
   document.body.classList.add("debugging");
   const target = loc ? loc.target : null, prev = DBG.now;
-  if (loc && loc.opened) refresh();
+  let unhid = false;
+  if (target && isHidden(target)) { shownMinor.add(target); unhid = true; }
+  if (loc && (loc.opened || unhid)) refresh();
   if (target && target !== prev) {
     let p = parentOf.get(target), changed = false;
     while (p) { if (!open.has(p)) { open.add(p); changed = true; } p = parentOf.get(p); }
@@ -1706,7 +1764,7 @@ function load(graph, enrich, keepView) {
     if (saved) {
       dir = saved.dir === "TB" ? "TB" : "LR";
       groupMode = saved.groupMode || "comments"; showLookups = !!saved.showLookups; showGlobals = !!saved.showGlobals;
-      foldCode = !!saved.foldCode; wheelZooms = !!saved.wheelZooms; chatOpen = !!saved.chat && !!vscodeApi;
+      foldCode = !!saved.foldCode; wheelZooms = !!saved.wheelZooms; chatOpen = !!saved.chat && !!vscodeApi; hideMinor = saved.hideMinor !== false;
       store = { TB: saved.TB || { top: {}, inner: {} }, LR: saved.LR || { top: {}, inner: {} }, size: saved.size || {} };
       savedOpen = saved.grouped ? saved.open || [] : null;   // a flat map saved nothing worth restoring
     }
@@ -1727,6 +1785,7 @@ window.addEventListener("message", (ev) => {
   else if (m.type === "status") { if ("text" in m) setStatus(m.text, m.error); $("b-explain").disabled = !!m.busy; }
   else if (m.type === "chatReply") chatReply(m);
   else if (m.type === "chatOpen") { setChat(true); if (m.text) sendChat(m.text); }
+  else if (m.type === "exportRequest") $("b-export").click();
   else if (m.type === "debug") {
     if (m.event === "start") { debugReset(); select(null); DBG.active = true; document.body.classList.add("debugging"); setStatus("▶ debugger running — the map follows each stop"); }
     else if (m.event === "stopped") debugStop(m);

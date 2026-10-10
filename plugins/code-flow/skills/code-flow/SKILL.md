@@ -54,9 +54,14 @@ The scripts live in the `scripts/` folder of this skill's directory. Below,
    `SKILL_DIR/reference/explain_prompt.md` exactly, and add a top-level
    `"source_hash"` copied from the brief so stale notes are ignored after the
    script changes. Save it as `<script dir>/.codeflow/<script stem>.enrich.json`.
-   Block summaries must be concrete (inputs → output and the rule, with the
-   real column names, keys, windows and defaults), never a restatement of the
-   docstring, which is shown beside your note; use `watch` for a gotcha.
+   Give every block a `role`: `key` (changes the data the result depends on),
+   `support` (prepares something for a key block) or `minor` (guards, asserts,
+   logging, prints, counters). The brief carries the parser's guess as
+   `role?=`; override it where the code says otherwise. Key-block summaries
+   must be concrete (inputs → output and the rule, with the real column names,
+   keys, windows and defaults), never a restatement of the docstring, which is
+   shown beside your note; support blocks get one short sentence, minor blocks
+   a few words. Use `watch` for a gotcha.
    Also cover the blocks listed under FUNCTION FLOWS (ids like
    `attribute_by_erc/n9`): that is where the detailed rules belong, since the
    reader sees them when they open the function. Write a summary for every
@@ -96,6 +101,9 @@ list) to see its blocks, **Collapse ▴** to fold it back, **Overview / All bloc
 for everything at once (`O` / `A`). **Open flow ▸** on a function block shows
 the function's own map in place; **Collapse ▴** on its frame closes it. Drag blocks and cards by their header;
 scroll (or drag the background) to pan; ⌘/ctrl+scroll, pinch or `+`/`-` to zoom.
+Key blocks are drawn in full, support blocks folded to their chips, and minor
+blocks (guards, logging) are hidden — the container header counts them, and
+View ▾ ▸ Hide minor blocks (or `M`) shows them as slim strips.
 Scrolling over a code panel scrolls the code, in both directions. Global reads
 inside functions show as tags by default; View ▾ can draw them as arrows. **↓ Vertical / → Horizontal** (or `D`)
 switches direction; each direction remembers its own arrangement. Click a block to highlight everything

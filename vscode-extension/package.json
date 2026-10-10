@@ -2,7 +2,7 @@
   "name": "code-flow",
   "displayName": "Code Flow",
   "description": "See a Python script as a map of code blocks linked by the variables they pass. Chat with Claude Code about it, and watch the map follow the debugger block by block.",
-  "version": "0.6.0",
+  "version": "0.7.1",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {
@@ -37,6 +37,10 @@
       {
         "command": "codeFlow.chat",
         "title": "Code Flow: Chat with Claude about Script"
+      },
+      {
+        "command": "codeFlow.export",
+        "title": "Code Flow: Export Map as HTML"
       }
     ],
     "menus": {
@@ -82,6 +86,10 @@
         },
         {
           "command": "codeFlow.chat",
+          "when": "editorLangId == python"
+        },
+        {
+          "command": "codeFlow.export",
           "when": "editorLangId == python"
         }
       ]

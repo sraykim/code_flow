@@ -1,7 +1,7 @@
 {
   "name": "code-flow",
   "description": "Turn a single Python script into an interactive dataflow map plus a plain-English walkthrough. Use /code-flow:code-flow <script.py>.",
-  "version": "0.6.0",
+  "version": "0.7.1",
   "author": { "name": "Seung Rae Kim" },
   "homepage": "https://github.com/sraykim/code_flow",
   "repository": "https://github.com/sraykim/code_flow",
