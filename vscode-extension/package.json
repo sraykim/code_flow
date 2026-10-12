@@ -1,8 +1,8 @@
 {
   "name": "code-flow",
   "displayName": "Code Flow",
-  "description": "See a Python script as a map of code blocks linked by the variables they pass. Chat with Claude Code about it, and watch the map follow the debugger block by block.",
-  "version": "0.7.1",
+  "description": "See a Python script or Jupyter notebook as a map of code blocks linked by the variables they pass. Chat with Claude Code about it, watch the map follow the debugger, export it as HTML.",
+  "version": "0.8.0",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {
@@ -19,7 +19,9 @@
     "visualize",
     "claude",
     "debugger",
-    "chat"
+    "chat",
+    "jupyter",
+    "notebook"
   ],
   "main": "./extension.js",
   "activationEvents": [],
@@ -61,36 +63,43 @@
       "explorer/context": [
         {
           "command": "codeFlow.open",
-          "when": "resourceLangId == python",
+          "when": "resourceLangId == python || resourceExtname == .ipynb",
           "group": "navigation@90"
         },
         {
           "command": "codeFlow.explain",
-          "when": "resourceLangId == python",
+          "when": "resourceLangId == python || resourceExtname == .ipynb",
           "group": "navigation@91"
         },
         {
           "command": "codeFlow.chat",
-          "when": "resourceLangId == python",
+          "when": "resourceLangId == python || resourceExtname == .ipynb",
           "group": "navigation@92"
         }
       ],
       "commandPalette": [
         {
           "command": "codeFlow.open",
-          "when": "editorLangId == python"
+          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
         },
         {
           "command": "codeFlow.explain",
-          "when": "editorLangId == python"
+          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
         },
         {
           "command": "codeFlow.chat",
-          "when": "editorLangId == python"
+          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
         },
         {
           "command": "codeFlow.export",
-          "when": "editorLangId == python"
+          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
+        }
+      ],
+      "notebook/toolbar": [
+        {
+          "command": "codeFlow.open",
+          "when": "notebookType == jupyter-notebook",
+          "group": "navigation"
         }
       ]
     },

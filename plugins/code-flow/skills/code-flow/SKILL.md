@@ -39,7 +39,13 @@ The scripts live in the `scripts/` folder of this skill's directory. Below,
 ## Steps
 
 1. **Find the script.** Use the path the user gave (or the file they're
-   working on). If it isn't a `.py` file, say so and stop.
+   working on). It can be a `.py` file or a Jupyter notebook (`.ipynb`);
+   anything else, say so and stop. A notebook is read as one script: code
+   cells in document order, markdown headings as sections, magics and shell
+   escapes commented out, each cell's output attached to its last block.
+   The brief flags cells run out of document order and names read before
+   the cell that defines them — mention those to the user; they are the
+   usual reason a notebook fails on Restart & Run All.
 
 2. **Parse it (deterministic).**
    ```bash
@@ -48,7 +54,12 @@ The scripts live in the `scripts/` folder of this skill's directory. Below,
    This prints the block ids, what each block reads and writes, and the edges
    the parser found. If it prints a `SyntaxError`, tell the user the line and stop.
 
-3. **Read the script yourself** (Read tool) with the brief beside it.
+3. **Read the script yourself** (Read tool) with the brief beside it. For a
+   notebook, read the flattened source instead, so your line numbers match
+   the brief:
+   ```bash
+   python3 "SKILL_DIR/scripts/codeflow_parse.py" path/to/notebook.ipynb --source
+   ```
 
 4. **Write the enrichment** (this is the intelligence layer). Follow
    `SKILL_DIR/reference/explain_prompt.md` exactly, and add a top-level

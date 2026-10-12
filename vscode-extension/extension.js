@@ -35,6 +35,9 @@ function activate(context) {
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (panels.has(doc.uri.fsPath)) refresh(context, doc.uri.fsPath);
     }),
+    vscode.workspace.onDidSaveNotebookDocument((doc) => {
+      if (panels.has(doc.uri.fsPath)) refresh(context, doc.uri.fsPath);
+    }),
     vscode.debug.registerDebugAdapterTrackerFactory("*", { createDebugAdapterTracker: (session) => debugTracker(session) }),
     vscode.debug.onDidTerminateDebugSession(() => { for (const st of panels.values()) if (st.debugging) { st.debugging = false; post(st, { type: "debug", event: "ended" }); } })
   );
@@ -43,13 +46,34 @@ function activate(context) {
 function deactivate() {}
 
 // ------------------------------------------------------------------ panel
+const isNotebook = (file) => path.extname(file).toLowerCase() === ".ipynb";
+
 function resolveFile(uri) {
-  const u = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri;
-  if (!u || u.scheme !== "file" || path.extname(u.fsPath).toLowerCase() !== ".py") {
-    vscode.window.showWarningMessage("Code Flow: open or select a Python (.py) file first.");
+  let u = uri instanceof vscode.Uri ? uri : null;
+  if (!u) {
+    const nb = vscode.window.activeNotebookEditor;
+    const ed = vscode.window.activeTextEditor;
+    if (ed && ed.document.uri.scheme === "file") u = ed.document.uri;
+    else if (nb) u = nb.notebook.uri;
+    else if (ed && ed.document.uri.scheme === "vscode-notebook-cell" && nb) u = nb.notebook.uri;
+  }
+  if (u && u.scheme === "vscode-notebook-cell") u = vscode.Uri.file(u.fsPath);
+  const ext = u ? path.extname(u.fsPath).toLowerCase() : "";
+  if (!u || u.scheme !== "file" || (ext !== ".py" && ext !== ".ipynb")) {
+    vscode.window.showWarningMessage("Code Flow: open or select a Python file (.py) or notebook (.ipynb) first.");
     return null;
   }
   return u.fsPath;
+}
+
+// The open notebook document for a panel's file, if VS Code has it open.
+function notebookDoc(file) {
+  return (vscode.workspace.notebookDocuments || []).find((d) => d.uri.scheme === "file" && samePath(d.uri.fsPath, file)) || null;
+}
+// Graph cell (by code-cell ordinal n) → the notebook's cell index and document.
+function graphCell(st, line) {
+  const nb = st.graph && st.graph.notebook;
+  return nb ? nb.cells.find((c) => line >= c.lines[0] && line <= c.lines[1]) || null : null;
 }
 
 async function openFlow(context, uri) {
@@ -153,7 +177,7 @@ async function onMessage(context, st, m) {
 // ------------------------------------------------------------------ export
 async function exportHtml(context, st, positions) {
   if (!st.graph || st.graph.error) { vscode.window.showWarningMessage("Code Flow: nothing to export until the script parses."); return; }
-  const base = path.basename(st.file, ".py");
+  const base = path.basename(st.file, path.extname(st.file));
   const target = await vscode.window.showSaveDialog({
     defaultUri: vscode.Uri.file(path.join(path.dirname(st.file), base + ".flow.html")),
     filters: { "HTML page": ["html"] },
@@ -177,6 +201,27 @@ async function exportHtml(context, st, positions) {
 
 async function reveal(file, line, end) {
   const uri = vscode.Uri.file(file);
+  const st = panels.get(file);
+  if (isNotebook(file) && st) {
+    const c = graphCell(st, line || 1);
+    if (!c) return;
+    try {
+      const doc = await vscode.workspace.openNotebookDocument(uri);
+      const visible = (vscode.window.visibleNotebookEditors || []).find((e) => samePath(e.notebook.uri.fsPath, file));
+      const ed = await vscode.window.showNotebookDocument(doc, { viewColumn: visible ? visible.viewColumn : vscode.ViewColumn.One, preserveFocus: false });
+      const range = new vscode.NotebookRange(c.index, c.index + 1);
+      ed.selection = range;
+      ed.revealRange(range, vscode.NotebookEditorRevealType.InCenter);
+      const cell = doc.cellAt(c.index);
+      const a = Math.max(0, (line || c.code_start) - c.code_start), b = Math.max(a, (end || line || c.code_start) - c.code_start);
+      const editor = await vscode.window.showTextDocument(cell.document, { viewColumn: ed.viewColumn, preserveFocus: false });
+      const last = Math.min(b, cell.document.lineCount - 1);
+      const r = new vscode.Range(Math.min(a, last), 0, last, cell.document.lineAt(last).text.length);
+      editor.selection = new vscode.Selection(r.start, r.end);
+      editor.revealRange(r, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    } catch (_) { /* cell editor not available; the notebook is revealed */ }
+    return;
+  }
   const visible = vscode.window.visibleTextEditors.find((e) => e.document.uri.fsPath === file);
   const doc = await vscode.workspace.openTextDocument(uri);
   const editor = await vscode.window.showTextDocument(doc, {
@@ -220,7 +265,7 @@ async function runParser(context, file, extra = []) {
     try {
       const out = await execFileP(py.cmd, [...py.args, script, file, ...extra], { cwd: path.dirname(file) });
       pythonCmd = py;
-      return extra.includes("--brief") ? out : JSON.parse(out);
+      return extra.includes("--brief") || extra.includes("--source") ? out : JSON.parse(out);
     } catch (e) {
       if (e.code === "ENOENT") continue; // interpreter not found, try the next one
       // A syntax error in the user's script comes back as JSON on stdout.
@@ -238,6 +283,12 @@ async function runParser(context, file, extra = []) {
 }
 
 // ------------------------------------------------------------------ Claude Code
+// Numbered source for Claude: the file itself, or a notebook flattened the way the parser sees it.
+async function sourceListing(context, file) {
+  if (isNotebook(file)) return (await runParser(context, file, ["--source"])).replace(/\s+$/, "");
+  return fs.readFileSync(file, "utf8").split(/\r?\n/).map((l, i) => `${String(i + 1).padStart(4)}  ${l}`).join("\n");
+}
+
 function savedEnrichment(context, st) {
   const e = context.workspaceState.get("enrich:" + st.file);
   return e && st.graph && e.source_hash === st.graph.source_hash ? e : null;
@@ -337,7 +388,7 @@ async function explain(context, file) {
   post(st, { type: "status", text: "Claude Code is reading the script…", busy: true });
   try {
     const brief = await runParser(context, file, ["--brief"]);
-    const source = fs.readFileSync(file, "utf8").split(/\r?\n/).map((l, i) => `${String(i + 1).padStart(4)}  ${l}`).join("\n");
+    const source = await sourceListing(context, file);
     const template = fs.readFileSync(path.join(context.extensionPath, "media", "explain_prompt.md"), "utf8");
     const prompt = `${template}\n\n${brief}\nSCRIPT (line numbers on the left):\n${source}\n`;
 
@@ -417,7 +468,7 @@ async function chat(context, st, m) {
     if (!st.chat || st.chat.hash !== st.graph.source_hash) {
       // New conversation (or the script changed): rebuild the context once; the session id keeps the follow-ups cheap.
       const brief = await runParser(context, st.file, ["--brief"]);
-      const source = fs.readFileSync(st.file, "utf8").split(/\r?\n/).map((l, i) => `${String(i + 1).padStart(4)}  ${l}`).join("\n");
+      const source = await sourceListing(context, st.file);
       st.chat = { id: crypto.randomUUID(), started: false, hash: st.graph.source_hash, system: chatSystemPrompt(),
                   intro: `${brief}\nSCRIPT (line numbers on the left):\n${source}\n`, child: null };
     }
@@ -468,7 +519,7 @@ function debugTracker(session) {
           frames = (r && r.stackFrames) || [];
         } catch (_) { return; }
         for (const st of panels.values()) {
-          const mine = frames.filter((f) => f.source && samePath(f.source.path, st.file)).map((f) => ({ line: f.line }));
+          const mine = isNotebook(st.file) ? notebookFrames(st, frames) : frames.filter((f) => f.source && samePath(f.source.path, st.file)).map((f) => ({ line: f.line }));
           if (!mine.length) continue;
           if (!st.debugging) { st.debugging = true; post(st, { type: "debug", event: "start" }); }
           post(st, { type: "debug", event: "stopped", frames: mine });
@@ -480,9 +531,43 @@ function debugTracker(session) {
   };
 }
 
+// Debug frames inside notebook cells carry the cell's URI; map them to the flattened line numbers.
+function notebookFrames(st, frames) {
+  const doc = notebookDoc(st.file), nb = st.graph && st.graph.notebook;
+  if (!doc || !nb) return [];
+  const out = [];
+  for (const f of frames) {
+    const p = f.source && (f.source.path || "");
+    if (!p) continue;
+    let idx = -1;
+    for (let i = 0; i < doc.cellCount && idx < 0; i++) {
+      const u = doc.cellAt(i).document.uri;
+      if (p === u.toString() || p === u.toString(true) || (p.includes("#") && u.fragment && p.endsWith("#" + u.fragment)) || p === u.fsPath) idx = i;
+    }
+    if (idx < 0) continue;
+    const c = nb.cells.find((x) => x.index === idx);
+    if (c) out.push({ line: c.code_start + f.line - 1 });
+  }
+  return out;
+}
+
 function setTrace(st, on, lines) {
   clearTrace(st);
   if (!on) return;
+  if (isNotebook(st.file)) {
+    const doc = notebookDoc(st.file);
+    if (!doc) { post(st, { type: "status", text: "trace: open the notebook in VS Code first", error: true }); return; }
+    st.traceBps = [];
+    for (const l of lines) {
+      const c = graphCell(st, l);
+      if (!c || c.index >= doc.cellCount) continue;
+      const cell = doc.cellAt(c.index);
+      st.traceBps.push(new vscode.SourceBreakpoint(new vscode.Location(cell.document.uri, new vscode.Position(Math.max(0, l - c.code_start), 0)), true, undefined, undefined, "Code Flow trace"));
+    }
+    if (st.traceBps.length) vscode.debug.addBreakpoints(st.traceBps);
+    post(st, { type: "status", text: `trace: ${st.traceBps.length} block breakpoints set — debug the notebook and press Continue to walk the map` });
+    return;
+  }
   const uri = vscode.Uri.file(st.file);
   const have = new Set(vscode.debug.breakpoints.filter((b) => b instanceof vscode.SourceBreakpoint && samePath(b.location.uri.fsPath, st.file)).map((b) => b.location.range.start.line));
   st.traceBps = lines.filter((l) => !have.has(l - 1)).map((l) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(l - 1, 0)), true, undefined, undefined, "Code Flow trace"));

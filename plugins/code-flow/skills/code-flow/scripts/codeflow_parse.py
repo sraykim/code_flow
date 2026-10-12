@@ -93,7 +93,7 @@ def assign_roles(nodes, edges):
     support: everything else. Claude may override these in its enrichment."""
     consumers = {}
     for e in edges:
-        if e["kind"] in ("data", "global", "branch"):
+        if e["kind"] in ("data", "global", "branch", "forward"):
             consumers.setdefault(e["source"], set()).add(e["target"])
     for n in nodes:
         k = n["kind"]
@@ -320,12 +320,160 @@ def _arg_names(args: ast.arguments):
     return names
 
 
+# ---------- Jupyter notebooks ----------
+# A notebook is read as one virtual script: the code cells in document order, each followed by a
+# blank line (so a cell never merges with the next), markdown headings turned into section banners,
+# and IPython-only syntax commented out so `ast` can parse it. Every virtual line maps back to a cell.
+NB_FOREIGN_MAGICS = {"bash", "sh", "script", "sql", "html", "javascript", "js", "latex", "markdown", "ruby",
+                     "perl", "writefile", "svg", "file", "R", "cython", "pypy", "bigquery", "spark"}
+NB_TEXT_LINES, NB_TEXT_CHARS, NB_IMAGE_BUDGET = 20, 3000, 400_000
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_HELP = re.compile(r"^\s*[\w.\[\]()'\"]+\?{1,2}\s*$")
+_MAGIC_ASSIGN = re.compile(r"^(\s*)([^=#]+?)\s*=\s*([%!].*)$")   # files = !ls, t = %time f()
+
+
+def _parses(code: str) -> bool:
+    try:
+        ast.parse(code)
+        return True
+    except SyntaxError:
+        return False
+
+
+def _clean_ipython(body):
+    """Comment out magics, shell escapes and `obj?` help lines, keeping line count and indentation."""
+    foreign = False
+    if body and body[0].lstrip().startswith("%%"):
+        words = body[0].lstrip()[2:].split()
+        foreign = bool(words) and words[0] in NB_FOREIGN_MAGICS
+    out = []
+    for line in body:
+        stripped = line.lstrip()
+        if foreign:   # the whole cell is another language: indentation means nothing to Python
+            out.append("#> " + stripped.rstrip())
+            continue
+        m = _MAGIC_ASSIGN.match(line.rstrip("\n"))
+        if m and not _parses(stripped) and _parses(m.group(2) + " = None"):   # keep the name flowing on
+            out.append(f"{m.group(1)}{m.group(2)} = None  #> {m.group(3).rstrip()}")
+            continue
+        if stripped.startswith(("%", "!")) or _HELP.match(line):
+            indent = line[: len(line) - len(stripped)]
+            out.append((indent + "pass  #> " + stripped.rstrip()) if indent else "#> " + stripped.rstrip())
+        else:
+            out.append(line.rstrip("\n"))
+    return out
+
+
+def _nb_text(x) -> str:
+    return "".join(x) if isinstance(x, list) else str(x or "")
+
+
+def _truncate(text: str) -> str:
+    lines = text.splitlines()
+    more = len(lines) - NB_TEXT_LINES
+    lines = [l if len(l) <= 200 else l[:199] + "…" for l in lines[:NB_TEXT_LINES]]
+    out = "\n".join(lines)
+    if len(out) > NB_TEXT_CHARS:
+        out = out[:NB_TEXT_CHARS] + "…"
+    if more > 0:
+        out += f"\n… {more} more lines"
+    return out
+
+
+def _strip_tags(html: str) -> str:
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.S | re.I)
+    text = re.sub(r"</t[dh]>", "\t", text, flags=re.I)
+    text = re.sub(r"</tr>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    return re.sub(r"\n\s*\n+", "\n", text).strip()
+
+
+def _collect_outputs(cell, budget: dict) -> list:
+    outs = []
+    for o in cell.get("outputs") or []:
+        t = o.get("output_type")
+        if t == "stream":
+            text = _nb_text(o.get("text"))
+            if text.strip():
+                outs.append({"kind": "error" if o.get("name") == "stderr" else "text", "text": _truncate(text)})
+        elif t in ("execute_result", "display_data"):
+            d = o.get("data") or {}
+            if "image/png" in d:
+                b64 = _nb_text(d["image/png"]).replace("\n", "")
+                if len(b64) <= budget["images"]:
+                    budget["images"] -= len(b64)
+                    outs.append({"kind": "image", "data": "data:image/png;base64," + b64})
+                else:
+                    outs.append({"kind": "text", "text": "[image omitted: notebook image budget used up]"})
+            elif "text/plain" in d:
+                outs.append({"kind": "text", "text": _truncate(_nb_text(d["text/plain"]))})
+            elif "text/html" in d:
+                outs.append({"kind": "text", "text": _truncate(_strip_tags(_nb_text(d["text/html"])))})
+            elif "application/json" in d:
+                outs.append({"kind": "text", "text": _truncate(json.dumps(d["application/json"], indent=1))})
+        elif t == "error":
+            tb = [_ANSI.sub("", l) for l in (o.get("traceback") or [])]
+            tail = "\n".join(tb[-4:])
+            outs.append({"kind": "error", "text": _truncate(f"{o.get('ename', 'Error')}: {o.get('evalue', '')}\n{tail}".strip())})
+    return outs[:6]
+
+
+def load_notebook(path: str):
+    nb = json.loads(Path(path).read_text(encoding="utf-8"))
+    cells, lines, heading, md_buf = [], [], None, []
+    budget = {"images": NB_IMAGE_BUDGET}
+    exec_max, out_of_order, n, doc = 0, [], 0, ""
+    for idx, c in enumerate(nb.get("cells") or []):
+        src = _nb_text(c.get("source"))
+        kind = c.get("cell_type")
+        if kind == "markdown":
+            for ln in src.splitlines():
+                m = re.match(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$", ln)
+                if m:
+                    heading, md_buf = m.group(1).strip(), []
+                elif ln.strip():
+                    md_buf.append(ln.strip())
+            if not doc and not cells and md_buf:
+                doc = " ".join(md_buf)[:600]
+            continue
+        if kind != "code":
+            continue
+        n += 1
+        ec = c.get("execution_count")
+        start = len(lines) + 1
+        if heading is not None:
+            lines.append(f"# --- {heading} ---")
+            heading = None
+        code_start = len(lines) + 1
+        lines.extend(_clean_ipython(src.splitlines()))
+        end = len(lines)
+        lines.append("")
+        if isinstance(ec, int):
+            if ec < exec_max:
+                out_of_order.append(n)
+            exec_max = max(exec_max, ec)
+        cells.append({"n": n, "index": idx, "id": c.get("id"), "exec": ec if isinstance(ec, int) else None,
+                      "lines": [start, max(end, code_start)], "code_start": code_start,
+                      "md": " ".join(md_buf)[:400], "outputs": _collect_outputs(c, budget)})
+        md_buf = []
+    source = "\n".join(lines) + "\n"
+    return source, {"cells": cells, "code_cells": n, "out_of_order": out_of_order, "doc": doc}
+
+
+def cell_of(nbinfo: dict, line: int):
+    for c in nbinfo["cells"]:
+        if c["lines"][0] <= line <= c["lines"][1]:
+            return c
+    return None
+
+
 # --------------------------------------------------------------------------
 # Graph builder
 # --------------------------------------------------------------------------
 class GraphBuilder:
-    def __init__(self, source: str, path: str):
+    def __init__(self, source: str, path: str, notebook: dict | None = None):
         self.source = source
+        self.notebook = notebook
         self.lines = source.splitlines()
         self.path = path
         self.tree = ast.parse(source, filename=path)
@@ -352,7 +500,7 @@ class GraphBuilder:
     def leading_comment(self, lineno):
         """Comment lines directly above `lineno` (no blank line between)."""
         out, i = [], lineno - 2
-        while i >= 0 and self.lines[i].strip().startswith("#"):
+        while i >= 0 and self.lines[i].strip().startswith("#") and not self.lines[i].strip().startswith("#>"):
             out.append(self.lines[i].strip().lstrip("#").strip(" -=*"))
             i -= 1
         out.reverse()
@@ -1012,6 +1160,7 @@ class GraphBuilder:
         self.add_helpers()
         self.mark_lookups()
         self.retitle()
+        notebook = self.notebook_info() if self.notebook else None   # may add forward-reference edges
         assign_roles(self.nodes, list(self.edges.values()))
         flows = self.build_flows()
         defs_out = {
@@ -1024,7 +1173,7 @@ class GraphBuilder:
             "file_name": Path(self.path).name,
             "source_hash": hashlib.sha1(self.source.encode()).hexdigest()[:12],
             "line_count": len(self.lines),
-            "module_doc": self.module_doc.strip(),
+            "module_doc": (self.notebook and self.notebook.get("doc") or self.module_doc).strip(),
             "entry": self.entry,
             "imports": self.imports,
             "defs": defs_out,
@@ -1033,12 +1182,60 @@ class GraphBuilder:
             "flows": flows,
             "nodes": self.nodes,
             "edges": list(self.edges.values()),
+            "notebook": notebook,
         }
+
+    def notebook_info(self):
+        """Tag blocks with their cell, attach each cell's output to its last block, and find the two
+        notebook traps: cells run out of document order, and names read before the cell that defines them."""
+        nb = self.notebook
+        last_in_cell = {}
+        for i, nd in enumerate(self.nodes):
+            c = cell_of(nb, nd["lines"][0])
+            if not c:
+                continue
+            nd["cell"] = c["n"]
+            if c["exec"] is not None:
+                nd["exec"] = c["exec"]
+            if c["n"] not in last_in_cell or nd["lines"][1] > self.nodes[last_in_cell[c["n"]]]["lines"][1]:
+                last_in_cell[c["n"]] = i
+        for c in nb["cells"]:
+            if c["outputs"] and c["n"] in last_in_cell:
+                self.nodes[last_in_cell[c["n"]]]["outputs"] = c["outputs"]
+        written, forward, first_writer = set(), [], {}
+        for nd in self.nodes:
+            for w in nd.get("writes") or []:
+                first_writer.setdefault(w, nd)
+        for nd in self.nodes:
+            for r in nd.get("reads") or []:
+                w = first_writer.get(r)
+                if r not in written and w is not None and w is not nd and w["lines"][0] > nd["lines"][0]:
+                    forward.append({"var": r, "node": nd["id"], "cell": nd.get("cell"), "defined_in": w["id"], "defined_cell": w.get("cell")})
+                    nd.setdefault("forward_reads", []).append(r)
+                    self.add_edge(w["id"], nd["id"], r, "forward")
+            written.update(nd.get("writes") or [])
+        cells = [{k: v for k, v in c.items() if k != "outputs"} | {"has_output": bool(c["outputs"])} for c in nb["cells"]]
+        return {"cells": cells, "code_cells": nb["code_cells"], "out_of_order": nb["out_of_order"], "forward_refs": forward}
+
+
+def load_source(path: str) -> tuple[str, dict | None]:
+    """The text the parser works on: the file itself, or a notebook flattened into a virtual script."""
+    if Path(path).suffix.lower() == ".ipynb":
+        return load_notebook(path)
+    return Path(path).read_text(encoding="utf-8"), None
 
 
 def parse_file(path: str) -> dict:
-    source = Path(path).read_text(encoding="utf-8")
-    return GraphBuilder(source, path).build()
+    source, nb = load_source(path)
+    try:
+        return GraphBuilder(source, path, nb).build()
+    except SyntaxError as e:
+        # Report a notebook error against its cell, not the flattened line number.
+        c = cell_of(nb, e.lineno) if nb and e.lineno else None
+        if c:
+            e.msg = f"{e.msg} in code cell {c['n']}" + (f" (In [{c['exec']}])" if c["exec"] is not None else "")
+            e.lineno = max(1, e.lineno - c["code_start"] + 1)
+        raise
 
 
 def brief(graph: dict) -> str:
@@ -1047,9 +1244,18 @@ def brief(graph: dict) -> str:
     if graph.get("entry"):
         e = graph["entry"]
         out.append(f"ENTRY: the pipeline is the body of {e['name']}() (lines {e['lines'][0]}-{e['lines'][1]}), called at line {e['call_line']}")
+    nb = graph.get("notebook")
+    if nb:
+        out.append(f"NOTEBOOK: {nb['code_cells']} code cells read in document order; line numbers are of the flattened notebook, 'cell [k]' is the cell's execution count")
+        if nb["out_of_order"]:
+            out.append(f"  WARNING run order differs from document order at code cells {nb['out_of_order']}")
+        for f in nb["forward_refs"]:
+            out.append(f"  WARNING {f['var']} is read in {f['node']} (code cell {f['cell']}) but only defined later in {f['defined_in']} (code cell {f['defined_cell']}): works in a live kernel, breaks on Restart & Run All")
     out += ["", "BLOCKS:"]
     for n in graph["nodes"]:
         bits = [f"{n['id']}", n["kind"], repr(n["title"]), f"lines {n['lines'][0]}-{n['lines'][1]}"]
+        if n.get("cell"):
+            bits.append(f"cell [{n['exec']}]" if n.get("exec") is not None else f"code cell {n['cell']}")
         if n.get("def"):
             d = graph["defs"][n["def"]]
             bits.append(f"def at {d['lines'][0]}-{d['lines'][1]}")
@@ -1060,6 +1266,10 @@ def brief(graph: dict) -> str:
                 bits.append(f"{key}={','.join(n[key])}")
         bits.append(f"role?={n.get('role', 'support')}")
         out.append("  " + " | ".join(bits))
+        for o in (n.get("outputs") or [])[:3]:
+            if o.get("text"):
+                shown = "\n".join(o["text"].splitlines()[:8])
+                out.append(f"      output ({o['kind']}): " + shown.replace("\n", "\n      "))
     if graph.get("sections"):
         out += ["", "SECTIONS (from the script's banner comments):"]
         for sec in graph["sections"]:
@@ -1098,7 +1308,13 @@ def main(argv=None):
     ap.add_argument("script", help="Python file to analyse")
     ap.add_argument("-o", "--output", help="Write JSON here instead of stdout")
     ap.add_argument("--brief", action="store_true", help="Print a compact block/edge list (for Claude) instead of JSON")
+    ap.add_argument("--source", action="store_true", help="Print the source the parser read (a notebook flattened to one script), with line numbers")
     args = ap.parse_args(argv)
+    if args.source:
+        src, _ = load_source(args.script)
+        for i, l in enumerate(src.splitlines(), 1):
+            print(f"{i:4d}  {l}")
+        return 0
     try:
         graph = parse_file(args.script)
     except SyntaxError as e:

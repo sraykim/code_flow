@@ -19,6 +19,11 @@ the output, writes, calls) are drawn in full, support blocks folded, and minor o
 counters) hidden behind a count until you ask for them (`M`). The parser guesses roles; Explain refines them
 and sizes its notes accordingly.
 
+Jupyter notebooks (`.ipynb`) work the same way: code cells are read in document order, markdown headings
+become sections, each cell's output (text, tables, images, errors) is shown under its block, line links
+point at cells, and the map flags the two notebook traps — cells run out of document order, and names used
+before the cell that defines them (dashed pink arrow).
+
 In VS Code, **💬 Chat** opens a conversation with Claude Code that sees the script, the map
 and whatever you have selected, and **⏺ Trace** makes the map follow the Python debugger:
 the block being executed lights up, the blocks already run keep a trail, and the arrows taken
@@ -51,7 +56,7 @@ Updates: `claude plugin marketplace update code-flow` then `claude plugin update
 
 **VS Code extension**
 ```
-code --install-extension dist/code-flow-0.7.1.vsix
+code --install-extension dist/code-flow-0.8.0.vsix
 ```
 Open a `.py` file → click the Code Flow icon in the editor title bar (or right-click → *Code Flow: Visualize Script*).
 Needs Python 3.8+ (standard library only). For explanations, Claude Code must be installed and signed in;

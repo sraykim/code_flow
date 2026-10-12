@@ -17,7 +17,7 @@ body {
   --focus: var(--vscode-focusBorder, #2f6fdb);
   --edge: #8d8a80;
   --k-step: #2f6fdb; --k-code: #6c6960; --k-value: #b06f12; --k-helper: #7a57c9;
-  --k-control: #0e8478; --k-unused: #9a978e; --implicit: #d9480f;
+  --k-control: #0e8478; --k-unused: #9a978e; --implicit: #d9480f; --fwd: #c2255c;
   --c-kw: #a626a4; --c-str: #3f8f3a; --c-num: #9a5b00; --c-com: #9a9a92;
   --c-fn: #2f6fdb; --c-bi: #b06f12; --c-local: #2f6fdb;
   --ui: var(--vscode-font-family, -apple-system, "Segoe UI", system-ui, sans-serif);
@@ -32,7 +32,7 @@ body {
     --border: var(--vscode-editorWidget-border, #34373d);
     --edge: #73716a;
     --k-step: #6ea1ff; --k-code: #9c998f; --k-value: #e0a43c; --k-helper: #a98bf0;
-    --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c;
+    --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c; --fwd: #ff6b9d;
     --c-kw: #c678dd; --c-str: #98c379; --c-num: #d19a66; --c-com: #7f848e;
     --c-fn: #61afef; --c-bi: #e5c07b; --c-local: #6ea1ff;
   }
@@ -41,7 +41,7 @@ body.vscode-dark, body.vscode-high-contrast {
   --panel: var(--vscode-editorWidget-background, #1d1f23);
   --edge: #73716a;
   --k-step: #6ea1ff; --k-code: #9c998f; --k-value: #e0a43c; --k-helper: #a98bf0;
-  --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c;
+  --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c; --fwd: #ff6b9d;
   --c-kw: #c678dd; --c-str: #98c379; --c-num: #d19a66; --c-com: #7f848e;
   --c-fn: #61afef; --c-bi: #e5c07b; --c-local: #6ea1ff;
 }
@@ -49,6 +49,24 @@ body.vscode-dark, body.vscode-high-contrast {
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: var(--bg); color: var(--fg); font: 13px/1.4 var(--ui); }
 button { font: inherit; color: inherit; }
+
+/* ---------- notebooks ---------- */
+.cellno { font: 11px var(--mono); color: var(--k-value); margin-left: 6px; white-space: nowrap; }
+.outp { margin: 0 8px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); }
+.outp .cap { font-size: 10.5px; color: var(--muted); padding: 3px 8px 0; text-transform: uppercase; letter-spacing: .05em; }
+.outp pre { margin: 0; padding: 4px 8px 6px; font: 11.5px/1.45 var(--mono); max-height: 160px; overflow: auto; white-space: pre; }
+.outp pre.err { color: var(--implicit); }
+.outp img { display: block; max-width: 100%; max-height: 220px; margin: 4px 8px 8px; border-radius: 4px; background: #fff; }
+.node.collapsed .outp pre { max-height: 72px; }
+.node.collapsed .outp img { max-height: 120px; }
+.fwd { margin: 0 10px 6px; font-size: 12px; color: var(--fwd); }
+.fwd::before { content: "⚠ "; }
+.overview .warn { display: block; margin-top: 6px; font-size: 12px; color: var(--fwd); }
+.overview .warn:empty { display: none; }
+.overview .warn a { color: inherit; cursor: pointer; text-decoration: underline dotted; }
+#edges .e.k-forward path.line { stroke: var(--fwd); stroke-dasharray: 3 3; stroke-width: 1.8; }
+#edges .e.k-forward .lbl text { fill: var(--fwd); }
+#edges .e.k-forward.hot path.line { stroke: var(--fwd); }
 
 /* ---------- block roles ---------- */
 .node.r-minor { opacity: .72; width: 360px; }
@@ -381,7 +399,7 @@ body.vscode-dark, body.vscode-high-contrast { --k-sec: #4fb6c9; }
   <div class="sep"></div>
   <button class="mi" id="m-drawer"><span class="ck"></span>Lookups &amp; imports…</button>
 </div>
-<div class="overview" id="overview" hidden><span class="src" id="ov-src"></span><span id="ov-text" title="Click to show all"></span><button class="x" id="ov-x" aria-label="Hide summary">×</button></div>
+<div class="overview" id="overview" hidden><span class="src" id="ov-src"></span><span id="ov-text" title="Click to show all"></span><span class="warn" id="ov-warn"></span><button class="x" id="ov-x" aria-label="Hide summary">×</button></div>
 <div id="chat" hidden>
   <div class="rzc" id="chat-rz"></div>
   <div class="chat-head"><b>✦ Chat with Claude</b><button class="ibtn" id="chat-new" title="Start a fresh conversation">new chat</button><button class="ibtn" id="chat-x">close</button></div>
@@ -513,9 +531,16 @@ const cap = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
 const niceTitle = (n) => (n.title_from === "code" ? n.title : cap(n.title));
 const isLeaf = (id) => NODES.has(id);
 const isCont = (id) => CONT.has(id);
+const cellAt = (line) => (G.notebook ? G.notebook.cells.find((c) => line >= c.lines[0] && line <= c.lines[1]) : null);
 function lineLink(start, end) {
-  const label = end && end !== start ? `L${start}–${end}` : `L${start}`;
-  if (vscodeApi) return `<button class="ibtn loc" data-line="${start}" data-end="${end || start}" title="Show in editor">${label}</button>`;
+  const c = cellAt(start);
+  let label = end && end !== start ? `L${start}–${end}` : `L${start}`;
+  if (c) {
+    const a = Math.max(1, start - c.code_start + 1), b = Math.max(a, (end || start) - c.code_start + 1);
+    label = (c.exec != null ? `In [${c.exec}]` : `cell ${c.n}`) + (b > a ? ` L${a}–${b}` : a > 1 || b > 1 ? ` L${a}` : "");
+  }
+  if (vscodeApi) return `<button class="ibtn loc" data-line="${start}" data-end="${end || start}" title="${c ? "Show this cell in the notebook" : "Show in editor"}">${label}</button>`;
+  if (c) return `<span class="ibtn loc" title="Code cell ${c.n} of the notebook">${label}</span>`;
   const p = G.file.startsWith("/") ? G.file : "/" + G.file.replace(/\\/g, "/");
   return `<a class="ibtn loc" href="vscode://file${encodeURI(p)}:${start}" title="Open in VS Code">${label}</a>`;
 }
@@ -743,6 +768,7 @@ function nodeHTML(n) {
   if (d && d.doc) h += `<div class="note doc" title="First line of the docstring">${esc(d.doc)}</div>`;
   if (en && en.summary) h += `<div class="sum">${esc(en.summary)}</div>`;
   if (en && en.watch) h += `<div class="watch">${esc(en.watch)}</div>`;
+  if (n.forward_reads && n.forward_reads.length) h += `<div class="fwd" title="Works while the kernel is alive; fails on Restart &amp; Run All">${esc(n.forward_reads.join(", "))} defined in a later cell</div>`;
   if (n.note && (n.kind === "step" || n.kind === "branch")) h += `<div class="note"># ${esc(n.note)}</div>`;
   if (n.kind === "branch") {
     h += `<div class="arms">` + n.arms.map((a) => `<span class="chip">${esc(a)}</span>`).join("") + `</div>`;
@@ -768,6 +794,10 @@ function nodeHTML(n) {
     h += `<div class="body">${highlight(d.code, d.lines[0])}</div>`;
   } else {
     h += `<div class="body">${highlight(n.code, n.lines[0])}</div>`;
+  }
+  if (n.outputs && n.outputs.length) {
+    h += `<div class="outp"><div class="cap">output</div>` + n.outputs.map((o) =>
+      o.kind === "image" ? `<img src="${o.data}" alt="cell output image">` : `<pre class="${o.kind === "error" ? "err" : ""}">${esc(o.text || "")}</pre>`).join("") + `</div>`;
   }
   return h;
 }
@@ -896,15 +926,25 @@ function buildAll() {
   const nl = G.edges.filter((e) => e.kind === "lookup").length, ng = G.edges.filter((e) => e.kind === "global").length;
   const real = allSections.filter((c) => !c.synthetic).length;
   const hidden = [nl && `${nl} lookup`, ng && !showGlobals && `${ng} global`].filter(Boolean).join(", ");
-  $("stats").textContent = (G.entry ? `pipeline = ${G.entry.name}() · ` : "") + (real ? `${real} sections · ` : "") +
+  $("stats").textContent = (G.notebook ? `notebook · ${G.notebook.code_cells} cells · ` : "") + (G.entry ? `pipeline = ${G.entry.name}() · ` : "") + (real ? `${real} sections · ` : "") +
     `${G.nodes.length} blocks · ${G.edges.length - nl - (showGlobals ? 0 : ng)} arrows` + (hidden ? ` · ${hidden} as tags` : "");
   $("seg-level").hidden = !real;
   const summary = (E && E.summary) || G.module_doc;
-  $("overview").hidden = !summary || overviewClosed;
-  $("ov-src").textContent = E && E.summary ? "✦ Claude" : "Docstring";
+  const warns = [];
+  if (G.notebook) {
+    const nb = G.notebook;
+    if (nb.out_of_order.length) {
+      const cells = nb.out_of_order.map((n) => { const c = nb.cells.find((x) => x.n === n); return c && c.exec != null ? `cell ${n} (In [${c.exec}])` : `cell ${n}`; });
+      warns.push(`cells ran out of document order: ${cells.join(", ")} — the map follows document order`);
+    }
+    for (const f of nb.forward_refs) warns.push(`<a data-go="${f.node}">${esc(f.var)}</a> is read in cell ${f.cell} but defined in cell ${f.defined_cell}: fails on Restart &amp; Run All`);
+  }
+  $("ov-warn").innerHTML = warns.map((w) => "⚠ " + w).join("<br>");
+  $("overview").hidden = (!summary && !warns.length) || overviewClosed;
+  $("ov-src").textContent = E && E.summary ? "✦ Claude" : G.notebook ? "Notebook" : "Docstring";
   $("ov-text").textContent = summary || "";
   $("empty").hidden = G.nodes.length > 0;
-  $("empty").textContent = "No top-level code found. Code Flow reads the statements at the top level of the script.";
+  $("empty").textContent = G.notebook ? "No code cells with Python in them." : "No top-level code found. Code Flow reads the statements at the top level of the script.";
   buildDrawer();
   syncControls();
   applyVisibility();
@@ -1093,7 +1133,7 @@ function place() {
 function drawEdges() {
   const svg = $("edges"); svg.textContent = "";
   const defs = document.createElementNS(SVGNS, "defs");
-  for (const [k, v] of [["data", "--edge"], ["global", "--edge"], ["lookup", "--edge"], ["calls", "--k-helper"], ["implicit", "--implicit"], ["branch", "--k-control"], ["hot", "--focus"]]) {
+  for (const [k, v] of [["data", "--edge"], ["global", "--edge"], ["lookup", "--edge"], ["calls", "--k-helper"], ["implicit", "--implicit"], ["branch", "--k-control"], ["forward", "--fwd"], ["hot", "--focus"]]) {
     const m = document.createElementNS(SVGNS, "marker");
     m.setAttribute("id", "ar-" + k); m.setAttribute("viewBox", "0 0 10 10"); m.setAttribute("refX", "9"); m.setAttribute("refY", "5");
     m.setAttribute("markerWidth", "7"); m.setAttribute("markerHeight", "7"); m.setAttribute("orient", "auto-start-reverse");
@@ -1452,6 +1492,7 @@ function setupToolbar() {
   $("drawer-body").addEventListener("click", (ev) => { const r = ev.target.closest("[data-node]"); if (r) focusNode(r.dataset.node); });
   $("b-legend").onclick = () => { const l = $("legend"); l.hidden = !l.hidden; $("b-legend").setAttribute("aria-expanded", String(!l.hidden)); };
   $("ov-x").onclick = () => { overviewClosed = true; $("overview").hidden = true; };
+  $("ov-warn").addEventListener("click", (ev) => { const a = ev.target.closest("[data-go]"); if (a) { ev.stopPropagation(); focusNode(a.dataset.go); } });
   $("ov-text").onclick = () => $("overview").classList.toggle("open");
   $("z-in").onclick = () => { const r = $("viewport").getBoundingClientRect(); zoomAt(1.2, r.width / 2, r.height / 2); };
   $("z-out").onclick = () => { const r = $("viewport").getBoundingClientRect(); zoomAt(1 / 1.2, r.width / 2, r.height / 2); };
@@ -1491,7 +1532,7 @@ function setupToolbar() {
   }
   const kinds = [["step", "main(): the program"], ["sec", "section (Open ▸)"], ["helper", "function (Open flow ▸)"], ["step", "function call"], ["code", "top-level code"], ["value", "settings / inputs"], ["control", "branch: one arm runs"]];
   const lines = [["--edge", "variable passed on", ""], ["--k-control", "branch arm", ""], ["--k-helper", "calls helper", "2 4"], ["--implicit", "Claude: hidden link", "7 4"],
-                 ["--edge", "global read (View ▾ to show)", "5 4"], ["--focus", "direct link of the selected block", ""], ["--k-value", "debugger: path taken", ""]];
+                 ["--edge", "global read (View ▾ to show)", "5 4"], ["--fwd", "notebook: defined in a later cell", "3 3"], ["--focus", "direct link of the selected block", ""], ["--k-value", "debugger: path taken", ""]];
   const sw = (c, dash) => `<svg viewBox="0 0 26 8"><line x1="0" y1="4" x2="26" y2="4" style="stroke:var(${c});stroke-width:2;stroke-dasharray:${dash}"/></svg>`;
   $("legend").innerHTML = kinds.map(([k, l]) => `<span class="it" data-k="${k}"><span class="sw"></span>${l}</span>`).join("") +
     `<span class="it"><span class="chip lk">NAME</span>lookup: tag, no arrow</span>` +
