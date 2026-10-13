@@ -2,7 +2,7 @@
   "name": "code-flow",
   "displayName": "Code Flow",
   "description": "See a Python script, notebook or SQL file as a map of code blocks linked by the variables and tables they pass \u2014 including the project's own modules and the CTEs inside queries. Chat with Claude Code about it, follow the debugger, export as HTML.",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {

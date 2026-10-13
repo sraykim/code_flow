@@ -313,7 +313,7 @@ async function runParser(context, file, extra = []) {
   let lastErr = null;
   for (const py of candidates) {
     try {
-      const out = await execFileP(py.cmd, [...py.args, script, file, ...extra], { cwd: path.dirname(file) });
+      const out = await execFileP(py.cmd, [...py.args, script, file, ...extra], { cwd: path.dirname(file), env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } });
       pythonCmd = py;
       return extra.includes("--brief") || extra.includes("--source") ? out : JSON.parse(out);
     } catch (e) {
@@ -368,6 +368,7 @@ function runClaude(bin, prompt, cwd, token, extraArgs = [], onChild = null) {
   return new Promise((resolve, reject) => {
     const child = cp.spawn(bin, args, { cwd, shell: process.platform === "win32", env: process.env });
     if (onChild) onChild(child);
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     let out = "", err = "", done = false;
     const finish = (fn, v) => { if (!done) { done = true; clearTimeout(timer); fn(v); } };
     const timer = setTimeout(() => {
@@ -383,7 +384,7 @@ function runClaude(bin, prompt, cwd, token, extraArgs = [], onChild = null) {
       else finish(resolve, out);
     });
     child.stdin.on("error", () => {});
-    child.stdin.end(prompt);
+    child.stdin.end(prompt, "utf8");
   });
 }
 

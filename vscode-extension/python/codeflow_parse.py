@@ -1968,6 +1968,12 @@ def brief(graph: dict) -> str:
 
 
 def main(argv=None):
+    # Windows encodes a piped stdout with the legacy code page; our titles contain "→" and friends.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("script", help="Python file to analyse")
     ap.add_argument("-o", "--output", help="Write JSON here instead of stdout")
