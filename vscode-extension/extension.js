@@ -249,18 +249,67 @@ function execFileP(cmd, args, opts) {
   });
 }
 
-function pythonCandidates() {
+// The interpreter the VS Code Python extension has selected for this workspace, if it is installed.
+async function pythonFromExtension() {
+  try {
+    const ext = vscode.extensions.getExtension("ms-python.python");
+    if (!ext) return null;
+    const api = ext.isActive ? ext.exports : await ext.activate();
+    const envs = api && api.environments;
+    if (!envs) return null;
+    const p = envs.getActiveEnvironmentPath && envs.getActiveEnvironmentPath();
+    const resolved = p && envs.resolveEnvironment ? await envs.resolveEnvironment(p) : null;
+    const exe = (resolved && resolved.executable && resolved.executable.uri && resolved.executable.uri.fsPath) || (p && p.path);
+    return exe && fs.existsSync(exe) ? exe : null;
+  } catch (_) { return null; }
+}
+
+function windowsPythonInstalls() {
+  const out = [];
+  const roots = [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Python"),
+    "C:\\Python313", "C:\\Python312", "C:\\Python311", "C:\\Python310",
+    path.join(process.env.USERPROFILE || "", "miniconda3"), path.join(process.env.USERPROFILE || "", "anaconda3"),
+    path.join(process.env.LOCALAPPDATA || "", "miniconda3"), path.join(process.env.LOCALAPPDATA || "", "anaconda3"),
+    "C:\\ProgramData\\miniconda3", "C:\\ProgramData\\anaconda3",
+  ];
+  for (const r of roots) {
+    try {
+      if (!r || !fs.existsSync(r)) continue;
+      const direct = path.join(r, "python.exe");
+      if (fs.existsSync(direct)) { out.push(direct); continue; }
+      for (const d of fs.readdirSync(r).sort().reverse()) {
+        const exe = path.join(r, d, "python.exe");
+        if (/^Python3/i.test(d) && fs.existsSync(exe)) out.push(exe);
+      }
+    } catch (_) { /* skip */ }
+  }
+  return out;
+}
+
+async function pythonCandidates() {
   const configured = vscode.workspace.getConfiguration("codeFlow").get("pythonPath");
   const list = [];
   if (configured) list.push({ cmd: configured, args: [] });
-  if (process.platform === "win32") list.push({ cmd: "py", args: ["-3"] }, { cmd: "python", args: [] });
-  else list.push({ cmd: "python3", args: [] }, { cmd: "python", args: [] }, { cmd: "/usr/bin/python3", args: [] });
+  const fromExt = await pythonFromExtension();
+  if (fromExt) list.push({ cmd: fromExt, args: [] });
+  if (process.platform === "win32") {
+    list.push({ cmd: "py", args: ["-3"] });
+    for (const exe of windowsPythonInstalls()) list.push({ cmd: exe, args: [] });
+    list.push({ cmd: "python3", args: [] }, { cmd: "python", args: [] });
+  } else {
+    list.push({ cmd: "python3", args: [] }, { cmd: "python", args: [] }, { cmd: "/usr/bin/python3", args: [] });
+  }
   return list;
 }
 
+// Windows' Store stub for python.exe prints this instead of running anything.
+const isStoreStub = (e) => /Python was not found|Microsoft Store|App execution aliases/i.test(String((e && (e.stdout || "")) + (e && (e.stderr || ""))));
+
 async function runParser(context, file, extra = []) {
   const script = path.join(context.extensionPath, "python", "codeflow_parse.py");
-  const candidates = pythonCmd ? [pythonCmd, ...pythonCandidates()] : pythonCandidates();
+  const found = await pythonCandidates();
+  const candidates = pythonCmd ? [pythonCmd, ...found] : found;
   let lastErr = null;
   for (const py of candidates) {
     try {
@@ -268,7 +317,7 @@ async function runParser(context, file, extra = []) {
       pythonCmd = py;
       return extra.includes("--brief") || extra.includes("--source") ? out : JSON.parse(out);
     } catch (e) {
-      if (e.code === "ENOENT") continue; // interpreter not found, try the next one
+      if (e.code === "ENOENT" || isStoreStub(e)) continue; // interpreter not found (or the Store stub), try the next one
       // A syntax error in the user's script comes back as JSON on stdout.
       if (e.stdout) {
         try {
@@ -280,7 +329,7 @@ async function runParser(context, file, extra = []) {
       if (/SyntaxError|invalid syntax/.test(String(e.stderr))) break;
     }
   }
-  throw lastErr || new Error("Python 3 was not found. Set codeFlow.pythonPath in Settings.");
+  throw lastErr || new Error("Python 3 was not found. Install Python (python.org, or select an interpreter in the Python extension) or set codeFlow.pythonPath in Settings to your python.exe.");
 }
 
 // ------------------------------------------------------------------ Claude Code

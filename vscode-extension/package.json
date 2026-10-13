@@ -2,7 +2,7 @@
   "name": "code-flow",
   "displayName": "Code Flow",
   "description": "See a Python script, notebook or SQL file as a map of code blocks linked by the variables and tables they pass \u2014 including the project's own modules and the CTEs inside queries. Chat with Claude Code about it, follow the debugger, export as HTML.",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {
@@ -125,7 +125,7 @@
         "codeFlow.pythonPath": {
           "type": "string",
           "default": "",
-          "description": "Python 3 interpreter used to parse scripts. Empty = try python3 / python / py."
+          "description": "Python 3 interpreter used to parse scripts (a full path to python.exe / python3). Empty = use the Python extension's selected interpreter, then py -3 / python3 / python and the usual install folders."
         },
         "codeFlow.claudePath": {
           "type": "string",
