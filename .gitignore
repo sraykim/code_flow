@@ -5,3 +5,6 @@ node_modules/
 .DS_Store
 dist/*.html
 dist/code-flow-skill.zip
+
+# local test scripts (some are client work; never commit)
+examples/

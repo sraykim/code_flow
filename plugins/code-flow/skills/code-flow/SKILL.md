@@ -39,8 +39,16 @@ The scripts live in the `scripts/` folder of this skill's directory. Below,
 ## Steps
 
 1. **Find the script.** Use the path the user gave (or the file they're
-   working on). It can be a `.py` file or a Jupyter notebook (`.ipynb`);
-   anything else, say so and stop. A notebook is read as one script: code
+   working on). It can be a `.py` file, a Jupyter notebook (`.ipynb`) or a
+   standalone `.sql` file (its map is the query's CTE flow); anything else,
+   say so and stop. Functions imported from the project's own modules
+   (`from _common.x import f`, `import pkg.mod as m`) are read too and
+   appear as ordinary blocks and flows — the brief's LOCAL MODULES list says
+   which; PACKAGES lists third-party imports with the blocks that use them.
+   SQL found in strings, f-strings, `.sql` files and `%%sql`-style cells is
+   parsed: blocks show the tables they read and write, a query opens into
+   one block per CTE (`<block>.sql/<id>` ids), and a table written by one
+   block and read by another is a 'table' edge. A notebook is read as one script: code
    cells in document order, markdown headings as sections, magics and shell
    escapes commented out, each cell's output attached to its last block.
    The brief flags cells run out of document order and names read before

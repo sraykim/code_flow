@@ -93,7 +93,7 @@ def assign_roles(nodes, edges):
     support: everything else. Claude may override these in its enrichment."""
     consumers = {}
     for e in edges:
-        if e["kind"] in ("data", "global", "branch", "forward"):
+        if e["kind"] in ("data", "global", "branch", "forward", "table"):
             consumers.setdefault(e["source"], set()).add(e["target"])
     for n in nodes:
         k = n["kind"]
@@ -109,6 +109,9 @@ def assign_roles(nodes, edges):
             role = "support"
         elif writes_file:
             role = "key"
+        elif n.get("sql"):
+            used = len(consumers.get(n["id"], ()))
+            role = "key" if (n["sql"]["writes"] or n.get("returns") or used >= 1) else "support"
         elif side_only:
             role = "minor"
         else:
@@ -329,34 +332,30 @@ NB_FOREIGN_MAGICS = {"bash", "sh", "script", "sql", "html", "javascript", "js", 
 NB_TEXT_LINES, NB_TEXT_CHARS, NB_IMAGE_BUDGET = 20, 3000, 400_000
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _HELP = re.compile(r"^\s*[\w.\[\]()'\"]+\?{1,2}\s*$")
-_MAGIC_ASSIGN = re.compile(r"^(\s*)([^=#]+?)\s*=\s*([%!].*)$")   # files = !ls, t = %time f()
 
 
-def _parses(code: str) -> bool:
-    try:
-        ast.parse(code)
-        return True
-    except SyntaxError:
-        return False
+NB_SQL_MAGICS = {"sql", "bigquery", "spark", "sparksql", "snowflake", "duckdb", "athena", "presto", "trino", "hive",
+                 "clickhouse", "mysql", "postgres", "postgresql", "sqlite", "redshift", "teradata", "synapse"}
 
 
 def _clean_ipython(body):
-    """Comment out magics, shell escapes and `obj?` help lines, keeping line count and indentation."""
+    """Comment out magics, shell escapes and `obj?` help lines, keeping line count and indentation.
+    A %%sql-style cell becomes `result = r'''<query>'''` so the SQL is found like any other string."""
     foreign = False
     if body and body[0].lstrip().startswith("%%"):
         words = body[0].lstrip()[2:].split()
+        if words and words[0].lower() in NB_SQL_MAGICS:
+            target = next((w for w in words[1:] if re.fullmatch(r"[A-Za-z_]\w*", w)), None) or "_sql_result"
+            q = "'''" if "'''" not in "\n".join(body) else '"""'
+            rest = body[1:]
+            if not rest:
+                return [f"{target} = {q}{q}  #> {body[0].strip()}"]
+            return [f"{target} = r{q}  #> {body[0].strip()}"] + rest[:-1] + [rest[-1].rstrip("\n") + q]
         foreign = bool(words) and words[0] in NB_FOREIGN_MAGICS
     out = []
     for line in body:
         stripped = line.lstrip()
-        if foreign:   # the whole cell is another language: indentation means nothing to Python
-            out.append("#> " + stripped.rstrip())
-            continue
-        m = _MAGIC_ASSIGN.match(line.rstrip("\n"))
-        if m and not _parses(stripped) and _parses(m.group(2) + " = None"):   # keep the name flowing on
-            out.append(f"{m.group(1)}{m.group(2)} = None  #> {m.group(3).rstrip()}")
-            continue
-        if stripped.startswith(("%", "!")) or _HELP.match(line):
+        if foreign or stripped.startswith(("%", "!")) or _HELP.match(line):
             indent = line[: len(line) - len(stripped)]
             out.append((indent + "pass  #> " + stripped.rstrip()) if indent else "#> " + stripped.rstrip())
         else:
@@ -467,6 +466,366 @@ def cell_of(nbinfo: dict, line: int):
     return None
 
 
+# ---------- SQL inside the code ----------
+# SQL lives in strings: a literal passed to read_sql / execute / query, an f-string template, a `.sql`
+# file read from disk, a %%sql cell. We find it, split it into CTEs (each becomes a block when the
+# query is opened in place) and extract the tables it reads and writes, so table lineage between
+# blocks can be drawn without Claude guessing. Stdlib regexes do the work; sqlglot sharpens the
+# table list when it happens to be installed.
+SQL_START = re.compile(r"^\s*(?:--[^\n]*\n\s*|#[^\n]*\n\s*|/\*.*?\*/\s*)*(WITH|SELECT|INSERT|UPDATE|DELETE|CREATE|MERGE|ALTER|DROP|TRUNCATE|REPLACE|COPY|GRANT|CALL|EXPORT)\b", re.I | re.S)
+SQL_SINKS = {"read_sql", "read_sql_query", "read_sql_table", "read_database", "read_database_uri", "execute", "executemany",
+             "query", "sql", "run_query", "query_and_wait", "text", "raw_sql", "execute_query", "run"}
+SQL_KEYWORDS_NOT_TABLES = {"UNNEST", "LATERAL", "SELECT", "VALUES", "TABLE", "ONLY", "GENERATE_SERIES", "GENERATE_ARRAY",
+                           "JSON_TABLE", "DUAL", "EXTERNAL_QUERY", "ML", "TABLESAMPLE", "READ_PARQUET", "READ_CSV", "READ_CSV_AUTO", "READ_JSON"}
+_TBL = r"((?:[`\"\[]?[\w$\-{}]+[`\"\]]?\s*\.\s*){0,2}[`\"\[]?[\w$\-{}]+[`\"\]]?)"   # {name} keeps f-string placeholders
+_READ_RE = re.compile(r"\b(?:FROM|JOIN)\s+(?!\()" + _TBL + r"(?![\w$])(?!\s*\()", re.I)
+_WRITE_RES = [
+    re.compile(r"\bINSERT\s+(?:OR\s+\w+\s+)?(?:INTO|OVERWRITE)\s+(?:TABLE\s+)?" + _TBL, re.I),
+    re.compile(r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+|TRANSIENT\s+|EXTERNAL\s+|MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?" + _TBL, re.I),
+    re.compile(r"\bUPDATE\s+(?:ONLY\s+)?" + _TBL, re.I),
+    re.compile(r"\bDELETE\s+FROM\s+(?:ONLY\s+)?" + _TBL, re.I),
+    re.compile(r"\bMERGE\s+(?:INTO\s+)?" + _TBL, re.I),
+    re.compile(r"\bTRUNCATE\s+(?:TABLE\s+)?" + _TBL, re.I),
+    re.compile(r"\bDROP\s+(?:TABLE|VIEW)\s+(?:IF\s+EXISTS\s+)?" + _TBL, re.I),
+    re.compile(r"\bCOPY\s+(?:INTO\s+)?" + _TBL, re.I),
+]
+_CTE_HEAD = re.compile(r"([`\"\[]?[\w$]+[`\"\]]?)\s*(?:\([^)]*\)\s*)?AS\s*\(", re.I)
+
+
+def _blank_comments(sql: str) -> str:
+    """Replace comments and string literals with spaces, keeping every character position."""
+    out, i, n = [], 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if sql.startswith("--", i) or sql.startswith("#", i) and (i == 0 or sql[i - 1] in " \n\t"):
+            j = sql.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i)); i = j
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append(re.sub(r"[^\n]", " ", sql[i:j])); i = j
+        elif c == "'":   # single quotes are strings; double quotes are identifiers in most dialects, keep them
+            j = i + 1
+            while j < n and sql[j] != c:
+                j += 2 if sql[j] == "\\" else 1
+            j = min(n, j + 1)
+            out.append(c + re.sub(r"[^\n]", " ", sql[i + 1:j - 1]) + (c if j - i > 1 else "")); i = j
+        else:
+            out.append(c); i += 1
+    return "".join(out)
+
+
+def _clean_name(t: str) -> str:
+    return re.sub(r"[`\"\[\]]", "", re.sub(r"\s+", "", t))
+
+
+def _tables(sql_clean: str, exclude: set) -> list:
+    out = []
+    for m in _READ_RE.finditer(sql_clean):
+        name = _clean_name(m.group(1))
+        head = name.split(".")[0].upper()
+        if head in SQL_KEYWORDS_NOT_TABLES or name.upper() in exclude or not name or name[0].isdigit():
+            continue
+        if name not in out:
+            out.append(name)
+    return out
+
+
+def _write_targets(sql_clean: str) -> list:
+    out = []
+    for rx in _WRITE_RES:
+        for m in rx.finditer(sql_clean):
+            name = _clean_name(m.group(1))
+            if name and name.upper() not in SQL_KEYWORDS_NOT_TABLES and name not in out:
+                out.append(name)
+    return out
+
+
+def _match_paren(s: str, i: int) -> int:
+    """Index just past the ')' matching the '(' at i (s has strings/comments blanked)."""
+    depth, n = 0, len(s)
+    while i < n:
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
+def _split_ctes(clean: str):
+    """[(name, start, end)] for each CTE body (offsets into the text) and the offset where the final statement starts."""
+    m = re.match(r"\s*WITH\s+(?:RECURSIVE\s+)?", clean, re.I)
+    if not m:
+        return [], 0
+    pos, ctes = m.end(), []
+    while True:
+        h = _CTE_HEAD.match(clean, pos)
+        if not h:
+            break
+        start = h.end()
+        end = _match_paren(clean, start - 1)
+        ctes.append((_clean_name(h.group(1)), start, end - 1))
+        pos = end
+        c = re.match(r"\s*,\s*", clean[pos:])
+        if not c:
+            break
+        pos += c.end()
+    return ctes, pos
+
+
+def _dialect_hint(sql: str) -> str:
+    if re.search(r"`[\w{}-]+\.[\w{}-]+\.[\w{}-]+`|`[\w{}-]+\.[\w{}-]+`|\bSAFE_CAST\b|\bUNNEST\b|\bQUALIFY\b.*\bROW_NUMBER", sql, re.I | re.S):
+        return "bigquery"
+    if re.search(r"\bQUALIFY\b|\bFLATTEN\s*\(|\bVARIANT\b|\bILIKE\b", sql, re.I):
+        return "snowflake"
+    if re.search(r"::\w+|\bILIKE\b|\bRETURNING\b|\bNOW\(\)", sql, re.I):
+        return "postgres"
+    if re.search(r"\bread_parquet\s*\(|\bread_csv\w*\s*\(", sql, re.I):
+        return "duckdb"
+    return ""
+
+
+def parse_sql(text: str) -> dict:
+    """Tables read/written, CTEs with what each reads, and the final statement."""
+    text = re.sub(r"\{\{\s*ref\(\s*['\"]([\w.]+)['\"]\s*\)\s*\}\}", r"\1", text)
+    text = re.sub(r"\{\{\s*source\(\s*['\"]([\w.]+)['\"]\s*,\s*['\"]([\w.]+)['\"]\s*\)\s*\}\}", r"\1.\2", text)
+    clean = _blank_comments(text)
+    ctes, final_at = _split_ctes(clean)
+    names = {c[0].upper() for c in ctes}
+    line_at = lambda off: clean.count("\n", 0, off)
+    out_ctes = []
+    for name, a, b in ctes:
+        body = clean[a:b]
+        reads = _tables(body, set())
+        out_ctes.append({
+            "name": name, "lines": [line_at(a), line_at(b)], "code": text[a:b].strip("\n"),
+            "reads_ctes": [r for r in reads if r.upper() in names],
+            "reads": [r for r in reads if r.upper() not in names],
+            "writes": _write_targets(body),
+        })
+    final_clean, final_text = clean[final_at:], text[final_at:]
+    reads = _tables(final_clean, set())
+    kw = re.match(r"\s*(\w+)", final_clean)
+    final = {"kind": (kw.group(1).upper() if kw else "SELECT"), "lines": [line_at(final_at), text.count("\n")],
+             "code": final_text.strip("\n"), "reads_ctes": [r for r in reads if r.upper() in names],
+             "reads": [r for r in reads if r.upper() not in names], "writes": _write_targets(final_clean)}
+    all_reads = list(dict.fromkeys(r for c in out_ctes + [final] for r in c["reads"]))
+    all_writes = list(dict.fromkeys(w for c in out_ctes + [final] for w in c["writes"]))
+    try:  # sqlglot, when installed, knows the dialects better than our regexes
+        import sqlglot  # type: ignore
+        from sqlglot import exp  # type: ignore
+        tree = sqlglot.parse_one(clean, read=_dialect_hint(text) or None, error_level=sqlglot.ErrorLevel.IGNORE)
+        seen = []
+        for t in tree.find_all(exp.Table):
+            full = ".".join(p for p in (t.catalog, t.db, t.name) if p)
+            if full and full.upper() not in names and full not in seen:
+                seen.append(full)
+        if seen:
+            all_reads = [r for r in seen if r not in all_writes] or all_reads
+    except Exception:
+        pass
+    return {"dialect": _dialect_hint(text), "kind": final["kind"], "reads": all_reads, "writes": all_writes,
+            "ctes": out_ctes, "final": final, "lines": text.count("\n") + 1}
+
+
+def is_sql_text(text: str) -> bool:
+    return len(text) >= 12 and bool(SQL_START.match(text))
+
+
+def _joined_text(node) -> str:
+    parts = []
+    for v in node.values:
+        if isinstance(v, ast.Constant):
+            parts.append(str(v.value))
+        elif isinstance(v, ast.FormattedValue):
+            try:
+                parts.append("{" + ast.unparse(v.value) + "}")
+            except Exception:
+                parts.append("{…}")
+    return "".join(parts)
+
+
+def find_sql(stmts, script_dir: Path):
+    """SQL strings in these statements: [(text, start_line, file_or_None)], biggest first."""
+    found = []
+    for st in stmts:
+        for x in ast.walk(st):
+            text = None
+            if isinstance(x, ast.Constant) and isinstance(x.value, str):
+                text = x.value
+                if text.lower().endswith(".sql") and "\n" not in text and len(text) < 200:
+                    for base in (script_dir, Path.cwd()):
+                        p = (base / text).resolve()
+                        if p.is_file():
+                            try:
+                                body = p.read_text(encoding="utf-8", errors="replace")
+                            except OSError:
+                                continue
+                            if is_sql_text(body):
+                                found.append((body, 1, str(p)))
+                            break
+                    continue
+            elif isinstance(x, ast.JoinedStr):
+                text = _joined_text(x)
+            if text and is_sql_text(text):
+                found.append((text, x.lineno, None))
+    found.sort(key=lambda t: -len(t[0]))
+    return found
+
+
+def sql_flow(nid: str, sql: dict, base_line: int, file: str | None) -> dict:
+    """A query as a small pipeline: one block per CTE, one for the final statement, source tables as inputs."""
+    nodes, edges = [], []
+    off = (1 if file else base_line)
+    base_tables = list(dict.fromkeys(r for c in sql["ctes"] + [sql["final"]] for r in c["reads"]))
+    if base_tables:
+        nodes.append({"id": "in", "kind": "input", "title": "tables", "lines": [off, off], "code": "", "reads": [],
+                      "writes": base_tables, "refs": [], "role": "support", "sql_tables": True})
+    by_name = {}
+    for i, c in enumerate(sql["ctes"], 1):
+        cid = f"c{i}"
+        by_name[c["name"].upper()] = cid
+        nodes.append({"id": cid, "kind": "code", "title": c["name"], "title_from": "code", "lang": "sql",
+                      "lines": [off + c["lines"][0], off + c["lines"][1]], "code": c["code"],
+                      "reads": c["reads"] + c["reads_ctes"], "writes": [c["name"]], "refs": [],
+                      "role": "key" if c["reads_ctes"] or len(c["reads"]) > 1 else "support"})
+        for t in c["reads"]:
+            edges.append({"source": "in", "target": cid, "kind": "data", "vars": [t]})
+        for t in c["reads_ctes"]:
+            if t.upper() in by_name:
+                edges.append({"source": by_name[t.upper()], "target": cid, "kind": "data", "vars": [t]})
+    f = sql["final"]
+    fid = "out"
+    title = {"SELECT": "result", "INSERT": "insert into " + (", ".join(f["writes"]) or "…"), "CREATE": "create " + (", ".join(f["writes"]) or "…"),
+             "MERGE": "merge into " + (", ".join(f["writes"]) or "…"), "UPDATE": "update " + (", ".join(f["writes"]) or "…"),
+             "DELETE": "delete from " + (", ".join(f["writes"]) or "…")}.get(f["kind"], f["kind"].lower())
+    nodes.append({"id": fid, "kind": "code", "title": title, "title_from": "code", "lang": "sql",
+                  "lines": [off + f["lines"][0], off + f["lines"][1]], "code": f["code"],
+                  "reads": f["reads"] + f["reads_ctes"], "writes": f["writes"], "refs": [], "returns": True, "role": "key"})
+    for t in f["reads"]:
+        edges.append({"source": "in", "target": fid, "kind": "data", "vars": [t]})
+    for t in f["reads_ctes"]:
+        if t.upper() in by_name:
+            edges.append({"source": by_name[t.upper()], "target": fid, "kind": "data", "vars": [t]})
+    for c in sql["ctes"]:   # a CTE nobody reads still feeds the result in practice (or is dead); link it so it isn't orphaned
+        cid = by_name[c["name"].upper()]
+        if not any(e["source"] == cid for e in edges):
+            edges.append({"source": cid, "target": fid, "kind": "data", "vars": [c["name"]]})
+    name = f"{nid}.sql"
+    return {"name": name, "kind": "sql", "params": [], "config_params": [], "lines": [off, off + sql["lines"] - 1],
+            "nodes": nodes, "edges": edges, "lookups": [], "file": file, "dialect": sql["dialect"]}
+
+
+def sql_file_graph(path: str) -> dict:
+    """A standalone .sql file: the map is its CTE flow."""
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    sql = parse_sql(text)
+    flow = sql_flow("q", sql, 1, None)
+    nodes = []
+    for n in flow["nodes"]:
+        m = dict(n)
+        m["id"] = "n_" + n["id"]
+        if n["kind"] == "input":
+            m["kind"] = "value"; m["title"] = "source tables"; m["code"] = "\n".join("-- " + t for t in n["writes"])
+        nodes.append(m)
+    edges = [{"source": "n_" + e["source"], "target": "n_" + e["target"], "kind": e["kind"], "vars": e["vars"]} for e in flow["edges"]]
+    doc = ""
+    m = re.match(r"\s*((?:--[^\n]*\n)+)", text)
+    if m:
+        doc = " ".join(l.strip().lstrip("-").strip() for l in m.group(1).splitlines())
+    return {
+        "schema": SCHEMA_VERSION, "file": str(Path(path).resolve()), "file_name": Path(path).name,
+        "source_hash": hashlib.sha1(text.encode()).hexdigest()[:12], "line_count": text.count("\n") + 1,
+        "module_doc": doc[:600], "entry": None, "imports": [], "defs": {}, "sections": [], "lookups": [],
+        "flows": {}, "nodes": nodes, "edges": edges, "notebook": None, "sql_file": True,
+        "sql": {"dialect": sql["dialect"], "reads": sql["reads"], "writes": sql["writes"]},
+        "tables": [{"name": t, "read_by": [n["id"] for n in nodes if t in n.get("reads", [])], "written_by": [n["id"] for n in nodes if t in n.get("writes", []) and n["kind"] != "value"]} for t in dict.fromkeys(sql["reads"] + sql["writes"])],
+        "packages": [], "modules": [], "files": [str(Path(path).resolve())],
+    }
+
+
+
+# ---------- imports: the project's own modules, and third-party packages ----------
+MAX_ADOPTED_DEFS = 40       # functions pulled in from local modules (direct imports + what they call)
+ROOT_MARKERS = ("pyproject.toml", "setup.py", "setup.cfg", ".git", "requirements.txt")
+
+
+def _search_roots(script_dir: Path) -> list:
+    roots, cur = [script_dir], script_dir
+    for _ in range(6):
+        if any((cur / m).exists() for m in ROOT_MARKERS):
+            if cur not in roots:
+                roots.append(cur)
+            if (cur / "src").is_dir():
+                roots.append(cur / "src")
+            break
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+        if cur not in roots:
+            roots.append(cur)
+    return roots
+
+
+def _resolve_module(module: str, level: int, script_dir: Path) -> Path | None:
+    """Path of a module imported by the script, if it lives in the project (not site-packages)."""
+    if level:
+        base = script_dir
+        for _ in range(level - 1):
+            base = base.parent
+        bases = [base]
+    else:
+        bases = _search_roots(script_dir)
+    parts = module.split(".") if module else []
+    for b in bases:
+        cand = b.joinpath(*parts) if parts else b
+        for p in (cand.with_suffix(".py") if parts else None, cand / "__init__.py"):
+            if p and p.is_file() and "site-packages" not in str(p) and "dist-packages" not in str(p):
+                return p.resolve()
+    return None
+
+
+_pkg_cache: dict = {}
+_dist_map: dict | None = None
+
+
+def _dists():
+    global _dist_map
+    if _dist_map is None:
+        try:
+            import importlib.metadata as im
+            _dist_map = im.packages_distributions()
+        except Exception:
+            _dist_map = {}
+    return _dist_map
+
+
+def package_meta(top: str) -> dict:
+    """Version and one-line description of an installed distribution, without importing it."""
+    if top in _pkg_cache:
+        return _pkg_cache[top]
+    info = {"name": top, "version": None, "summary": "", "stdlib": False}
+    try:
+        if top in getattr(sys, "stdlib_module_names", ()):
+            info["stdlib"], info["summary"] = True, "Python standard library"
+        else:
+            import importlib.metadata as im
+            dists = _dists().get(top) or [top]
+            for dist in dists[:1]:
+                md = im.metadata(dist)
+                info["version"] = md.get("Version")
+                info["summary"] = (md.get("Summary") or "")[:160]
+                info["distribution"] = dist
+    except Exception:
+        pass
+    _pkg_cache[top] = info
+    return info
+
+
 # --------------------------------------------------------------------------
 # Graph builder
 # --------------------------------------------------------------------------
@@ -488,6 +847,17 @@ class GraphBuilder:
         self._counter = 0
         self.arms: list = []        # stack of {"of": branch node id, "label": arm label, "linked": bool}
         self.in_flow = False        # True while building a function's inner flow
+        self.flow_name = None       # name of the function whose flow is being built
+        self.sql_flows: dict = {}   # "<block>.sql" -> flow of that block's query (CTEs as blocks)
+        self.import_map: dict = {}  # alias -> {"module": dotted module, "name": member or None, "level": n}
+        self.modules: list = []     # local modules the script imports from, with what it pulled in
+        self.ext_flows: dict = {}   # flows of functions adopted from local modules
+        self.packages: dict = {}    # top-level package -> {"modules": set, "aliases": set}
+        self.adopted = 0
+        self.entry = None
+        self.section_heads = []
+        self.module_names = set()
+        self.consts = {}
 
     # ---------- helpers ----------
     def seg(self, start, end):
@@ -519,12 +889,19 @@ class GraphBuilder:
             line += " …"
         return line if len(line) <= limit else line[: limit - 1] + "…"
 
+    def call_key(self, node):
+        """The defs key a call resolves to: `f(...)` or `mod.f(...)` for a module imported from the project."""
+        if not isinstance(node, ast.Call):
+            return None
+        f = node.func
+        if isinstance(f, ast.Name) and f.id in self.defs:
+            return f.id
+        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f"{f.value.id}.{f.attr}" in self.defs:
+            return f"{f.value.id}.{f.attr}"
+        return None
+
     def is_local_call(self, node):
-        return (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in self.defs
-        )
+        return self.call_key(node) is not None
 
     def has_local_call(self, node):
         return any(self.is_local_call(n) for n in ast.walk(node))
@@ -563,14 +940,34 @@ class GraphBuilder:
         module_names = set()
         for st in self.tree.body:
             if isinstance(st, (ast.Import, ast.ImportFrom)):
+                rec = {"line": st.lineno, "code": self.seg(st.lineno, st.end_lineno), "names": []}
                 for a in st.names:
-                    self.imported.add((a.asname or a.name).split(".")[0])
-                self.imports.append({"line": st.lineno, "code": self.seg(st.lineno, st.end_lineno)})
+                    alias = (a.asname or a.name).split(".")[0]
+                    self.imported.add(alias)
+                    if isinstance(st, ast.ImportFrom):
+                        self.import_map[a.asname or a.name] = {"module": st.module or "", "name": a.name, "level": st.level}
+                        rec["module"] = ("." * st.level) + (st.module or "")
+                    else:
+                        self.import_map[alias] = {"module": a.name if a.asname else a.name.split(".")[0], "name": None, "level": 0,
+                                                  "full": a.name}
+                        rec["module"] = a.name
+                    rec["names"].append(a.asname or a.name)
+                self.imports.append(rec)
             elif isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 self.defs[st.name] = {"node": st}
             else:
                 module_names.update(collect(st).writes)
         self.module_names = module_names - set(self.defs) - self.imported
+        # Module-level string constants, so `{PROJECT}.crm.contacts` in an f-string query can be read as a real table name.
+        self.consts = {}
+        for st in self.tree.body:
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name):
+                if isinstance(st.value, ast.Constant) and isinstance(st.value.value, str):
+                    self.consts[st.targets[0].id] = st.value.value
+                elif isinstance(st.value, ast.JoinedStr):
+                    self.consts[st.targets[0].id] = _joined_text(st.value)
+        for _ in range(2):
+            self.consts = {k: re.sub(r"\{(\w+)\}", lambda m: self.consts.get(m.group(1), m.group(0)), v) for k, v in self.consts.items()}
 
         for name, d in self.defs.items():
             st = d["node"]
@@ -606,6 +1003,7 @@ class GraphBuilder:
             ]
             global_writes = [n for n in global_decl if n in stores and n in self.module_names]
             doc = ast.get_docstring(st) or ""
+            d["packages"] = self.packages_in([st])
             d.update(
                 name=name,
                 kind="class" if is_class else ("async" if isinstance(st, ast.AsyncFunctionDef) else "function"),
@@ -687,12 +1085,22 @@ class GraphBuilder:
         for k, (start, title) in enumerate(bounds):
             stop = bounds[k + 1][0] - 1 if k + 1 < len(bounds) else len(self.lines)
             secs.append({"title": self._clean_title(title), "lines": [start, stop], "nodes": []})
+        placed = {}
         for nd in self.nodes:
+            if nd.get("file"):
+                continue   # a block from another file: placed with its first user below
             ln = nd["lines"][0]
             target = secs[0]
             for sec in secs:
                 if ln >= sec["lines"][0]:
                     target = sec
+            target["nodes"].append(nd["id"])
+            placed[nd["id"]] = target
+        for nd in self.nodes:
+            if not nd.get("file"):
+                continue
+            user = next((u for u in self.nodes if nd.get("def") and nd["def"] in u.get("refs", []) and u["id"] in placed), None)
+            target = placed[user["id"]] if user else secs[-1]
             target["nodes"].append(nd["id"])
         secs = [sec for sec in secs if sec["nodes"]]
         if len(secs) < 2:
@@ -700,6 +1108,168 @@ class GraphBuilder:
         for i, sec in enumerate(secs, 1):
             sec["id"] = f"s{i}"
         return secs
+
+    def packages_in(self, stmts) -> list:
+        """Third-party / stdlib packages a piece of code touches, by the import aliases it loads."""
+        out = []
+        for st in stmts:
+            for x in ast.walk(st):
+                if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load) and x.id in self.import_map and x.id in self.imported:
+                    rec = self.import_map[x.id]
+                    if rec.get("local"):
+                        continue
+                    top = (rec["module"] or rec["name"] or x.id).lstrip(".").split(".")[0]
+                    if top and top not in out:
+                        out.append(top)
+        return out
+
+    def resolve_local_imports(self):
+        """Pull functions imported from the project's own modules into this graph (one level deep),
+        so a call to them is a real step block with code and an openable flow, not an opaque line."""
+        script_dir = Path(self.path).resolve().parent
+        builders: dict = {}
+
+        def builder_for(path: Path):
+            if path not in builders:
+                try:
+                    src = path.read_text(encoding="utf-8")
+                    mb = GraphBuilder(src, str(path))
+                    mb.collect_defs()
+                    builders[path] = mb
+                except (OSError, SyntaxError, RecursionError):
+                    builders[path] = None
+            return builders[path]
+
+        def adopt(mb, local, key, modname, path, record):
+            """Copy a module function into self.defs under `key`, and its module-local callees after it."""
+            if key in self.defs:
+                return
+            if self.adopted >= MAX_ADOPTED_DEFS:
+                return
+            d = mb.defs.get(local)
+            if not d:
+                return
+            self.adopted += 1
+            short = modname.split(".")[-1] or path.stem
+            keyfor = lambda r: record["keys"].get(r) or f"{short}.{r}"
+            nd = {k: v for k, v in d.items() if k != "node"}
+            nd["node"] = d["node"]
+            nd["name"] = key
+            nd["refs"] = [keyfor(r) for r in d["refs"]]
+            nd["origin"] = {"file": str(path), "module": modname, "name": local}
+            nd["used_at_top"] = False
+            self.defs[key] = nd
+            record["adopted"].append(key)
+            for r in d["refs"]:
+                adopt(mb, r, keyfor(r), modname, path, record)
+            if d["kind"] in ("function", "async"):
+                try:
+                    f = mb.build_flow(d)
+                except Exception:
+                    f = None
+                if f:
+                    for n in f["nodes"]:
+                        if n.get("def"):
+                            n["def"] = keyfor(n["def"])
+                        n["refs"] = [keyfor(r) if r in mb.defs else r for r in n.get("refs", [])]
+                        n["file"] = str(path)
+                    f["name"], f["file"] = key, str(path)
+                    for sk, sf in list(mb.sql_flows.items()):
+                        if sk.startswith(local + "/"):
+                            nk = key + sk[len(local):]
+                            for n in sf["nodes"]:
+                                n["file"] = sf.get("file") or str(path)
+                            self.ext_flows[nk] = sf
+                            for n in f["nodes"]:
+                                if n.get("sql_flow") == sk:
+                                    n["sql_flow"] = nk
+                    self.ext_flows[key] = f
+
+        def record_for(modname, path, mb):
+            rec_ = next((m for m in self.modules if m["file"] == str(path)), None)
+            if not rec_:
+                rec_ = {"module": modname, "file": str(path), "imported": [], "adopted": [], "keys": {},
+                        "doc": mb.module_doc.strip().splitlines()[0] if mb.module_doc.strip() else ""}
+                self.modules.append(rec_)
+            return rec_
+
+        def adopt_attrs(alias, mb, modname, path, record):
+            """`alias.f(...)` calls on a module object: adopt the functions the script uses."""
+            used = {x.attr for x in ast.walk(self.tree) if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and x.value.id == alias}
+            for attr in sorted(used):
+                if attr in mb.defs:
+                    record["keys"][attr] = f"{alias}.{attr}"
+            for attr in sorted(used):
+                if attr in mb.defs:
+                    adopt(mb, attr, f"{alias}.{attr}", modname, path, record)
+                    record["imported"].append(f"{alias}.{attr}")
+                elif attr in mb.consts:
+                    self.consts.setdefault(f"{alias}.{attr}", mb.consts[attr])
+
+        for alias, rec in list(self.import_map.items()):
+            if rec["name"] is None:
+                # `import pkg.mod [as m]`
+                path = _resolve_module(rec.get("full") or rec["module"], 0, script_dir)
+                if not path:
+                    continue
+                mb = builder_for(path)
+                if not mb:
+                    continue
+                rec["local"] = True
+                modname = (rec.get("full") or rec["module"]).lstrip(".")
+                adopt_attrs(alias, mb, modname, path, record_for(modname, path, mb))
+                continue
+            # `from pkg.mod import name`: name may be a function, a constant, or a submodule
+            name = rec["name"]
+            sub = _resolve_module(f"{rec['module']}.{name}" if rec["module"] else name, rec["level"], script_dir)
+            if sub:
+                smb = builder_for(sub)
+                if not smb:
+                    continue
+                rec["local"] = True
+                modname = (f"{rec['module']}.{name}" if rec["module"] else name).lstrip(".")
+                adopt_attrs(alias, smb, modname, sub, record_for(modname, sub, smb))
+                continue
+            path = _resolve_module(rec["module"], rec["level"], script_dir)
+            if not path:
+                continue
+            mb = builder_for(path)
+            if not mb:
+                continue
+            rec["local"] = True
+            modname = (rec["module"] or path.stem).lstrip(".")
+            record = record_for(modname, path, mb)
+            if name in mb.defs:
+                record["keys"][name] = alias
+                adopt(mb, name, alias, modname, path, record)
+                record["imported"].append(alias)
+                self.imported.discard(alias)
+            elif name in mb.consts:
+                self.consts.setdefault(alias, mb.consts[name])
+                record["imported"].append(alias)
+        self.module_names -= set(self.defs)
+        for m in self.modules:
+            m.pop("keys", None)
+
+    def package_table(self):
+        used_by = {}
+        for nd in self.nodes:
+            for pkg in nd.get("packages", []):
+                used_by.setdefault(pkg, []).append(nd["id"])
+        tops = []
+        for alias, rec in self.import_map.items():
+            if rec.get("local"):
+                continue
+            top = (rec["module"] or rec["name"] or alias).lstrip(".").split(".")[0]
+            if top and top not in tops:
+                tops.append(top)
+        out = []
+        for top in tops:
+            info = dict(package_meta(top))
+            info["used_by"] = used_by.get(top, [])
+            info["imports"] = [rec["code"] for rec in self.imports if any((n.split(".")[0] in self.import_map and (self.import_map[n.split(".")[0]]["module"] or self.import_map[n.split(".")[0]]["name"] or "").lstrip(".").split(".")[0] == top) for n in rec["names"])]
+            out.append(info)
+        return out
 
     # ---------- pass 2: the pipeline ----------
     def flush(self):
@@ -748,6 +1318,45 @@ class GraphBuilder:
                 return False
         return True
 
+    def attach_sql(self, node, stmts):
+        """Find SQL in a block's strings; record tables read/written and build the query's own flow."""
+        found = find_sql(stmts, Path(self.path).resolve().parent)
+        if not found:
+            return
+        reads, writes, primary = [], [], None
+        consts = getattr(self, "consts", {})
+        for text, line, file in found:
+            text = re.sub(r"\{(\w+)\}", lambda m: consts.get(m.group(1), m.group(0)), text)
+            parsed = parse_sql(text)
+            if primary is None:
+                primary = (parsed, line, file)
+            reads += [r for r in parsed["reads"] if r not in reads]
+            writes += [w for w in parsed["writes"] if w not in writes]
+        parsed, line, file = primary
+        node["sql"] = {"dialect": parsed["dialect"], "kind": parsed["kind"], "reads": reads, "writes": writes,
+                       "file": file, "queries": len(found)}
+        m = re.search(r"#> (%%\w+)(?:\s+(\w+))?", (node.get("code") or "").split("\n", 1)[0])
+        if m:   # a notebook SQL cell: title it by its magic and result variable
+            node["title"], node["title_from"] = m.group(1) + (f" → {node['writes'][0]}" if node.get("writes") else ""), "code"
+            node["kind"] = "code"
+        if parsed["ctes"] or len(parsed["reads"]) >= 2 or parsed["writes"]:
+            key = (f"{self.flow_name}/" if self.in_flow and self.flow_name else "") + f"{node['id']}.sql"
+            self.sql_flows[key] = sql_flow(node["id"], parsed, line, file)
+            node["sql_flow"] = key
+
+    def link_tables(self):
+        """Block A writes table T, a later block B reads T: a 'table' edge, the SQL counterpart of a variable."""
+        written = {}
+        for nd in self.nodes:
+            sq = nd.get("sql")
+            if not sq:
+                continue
+            for t in sq["reads"]:
+                for w in written.get(t.lower(), ()):
+                    self.add_edge(w, nd["id"], t, "table")
+            for t in sq["writes"]:
+                written.setdefault(t.lower(), []).append(nd["id"])
+
     def make_code_node(self, stmts):
         """Plain top-level code. Loops, ifs and `with` blocks stay whole."""
         nid = self.new_id("n")
@@ -795,6 +1404,8 @@ class GraphBuilder:
             node["returns"] = True
         node["_side_only"] = all(_side_stmt(st) for st in stmts)
         node["_writes_file"] = _writes_file(stmts)
+        node["packages"] = self.packages_in(stmts)
+        self.attach_sql(node, stmts)
         self.register(node)
         self.link_reads(nid, node["reads"])
         self.set_writes(nid, node["writes"])
@@ -815,7 +1426,7 @@ class GraphBuilder:
     def make_step_node(self, st, call):
         """A pipeline step: one statement whose value is a call to a local function."""
         nid = self.new_id("n")
-        d = self.defs[call.func.id]
+        d = self.defs[self.call_key(call)]
         if not self.in_flow:
             d["used_at_top"] = True
         c = collect(st)
@@ -839,9 +1450,11 @@ class GraphBuilder:
             "global_reads": list(d["global_reads"]),
             "writes": writes,
             "refs": list(dict.fromkeys(nested + d["refs"])),
+            "packages": list(dict.fromkeys(self.packages_in([st]) + d.get("packages", []))),
         }
         if isinstance(st, ast.Return) or any(isinstance(x, ast.Return) for x in ast.walk(st)):
             node["returns"] = True
+        self.attach_sql(node, [st])
         self.register(node)
         self.link_reads(nid, reads)
         self.link_reads(nid, d["global_reads"], kind="global")
@@ -1029,6 +1642,8 @@ class GraphBuilder:
                 "global_reads": list(d["global_reads"]),
                 "writes": [],
                 "refs": list(d["refs"]),
+                "packages": list(d.get("packages", [])),
+                **({"file": d["origin"]["file"]} if d.get("origin") else {}),
             })
         used = set()
         for node in self.nodes:
@@ -1056,6 +1671,7 @@ class GraphBuilder:
         saved = (self.nodes, self.edges, self.writers, self.pending, self._counter, self.arms, self.in_flow)
         self.nodes, self.edges, self.writers, self.pending, self._counter, self.arms = [], {}, {}, [], 0, []
         self.in_flow = True
+        self.flow_name = d["name"]
         try:
             params = [p for p in d["params"] if p not in ("self", "cls")]
             config = {p for p in params if _is_config_type(d.get("param_types", {}).get(p))}
@@ -1066,11 +1682,13 @@ class GraphBuilder:
                 self.set_writes("in", params)
             self.walk(body)
             self.flush()
+            self.link_tables()
             self.mark_lookups(config_params=config)
             nodes, edges, lookups = self.nodes, list(self.edges.values()), self.lookups
             assign_roles(nodes, edges)
         finally:
             (self.nodes, self.edges, self.writers, self.pending, self._counter, self.arms, self.in_flow) = saved
+            self.flow_name = None
         real = [n for n in nodes if n["kind"] != "input"]
         if len(real) < 2:
             return None
@@ -1082,10 +1700,13 @@ class GraphBuilder:
         for name, d in self.defs.items():
             if self.entry and name == self.entry["name"]:
                 continue  # its body is already the top-level pipeline
+            if d.get("origin"):
+                continue  # built by the module's own builder (ext_flows)
             if d["kind"] in ("function", "async"):
                 f = self.build_flow(d)
                 if f:
                     flows[name] = f
+        flows.update(self.ext_flows)
         return flows
 
     # ---------- pass 4: lookups ----------
@@ -1155,24 +1776,43 @@ class GraphBuilder:
     def build(self):
         self.entry = None
         self.collect_defs()
+        self.resolve_local_imports()
         self.section_heads = self.find_section_heads()
         self.walk(self.tree.body, top_level=True)
         self.add_helpers()
         self.mark_lookups()
         self.retitle()
+        self.link_tables()
         notebook = self.notebook_info() if self.notebook else None   # may add forward-reference edges
         assign_roles(self.nodes, list(self.edges.values()))
         flows = self.build_flows()
+        flows.update(self.sql_flows)
+        tables = {}
+        for nd in self.nodes:
+            for t in (nd.get("sql") or {}).get("reads", []):
+                tables.setdefault(t, {"name": t, "read_by": [], "written_by": []})["read_by"].append(nd["id"])
+            for t in (nd.get("sql") or {}).get("writes", []):
+                tables.setdefault(t, {"name": t, "read_by": [], "written_by": []})["written_by"].append(nd["id"])
         defs_out = {
             name: {k: v for k, v in d.items() if k not in ("node", "used_at_top", "used_inside_code")}
             for name, d in self.defs.items()
         }
+        files = [str(Path(self.path).resolve())] + [m["file"] for m in self.modules]
+        h = hashlib.sha1(self.source.encode())
+        for m in self.modules:
+            try:
+                h.update(Path(m["file"]).read_bytes())
+            except OSError:
+                pass
         return {
             "schema": SCHEMA_VERSION,
             "file": str(Path(self.path).resolve()),
             "file_name": Path(self.path).name,
-            "source_hash": hashlib.sha1(self.source.encode()).hexdigest()[:12],
+            "source_hash": h.hexdigest()[:12],
             "line_count": len(self.lines),
+            "files": files,
+            "modules": self.modules,
+            "packages": self.package_table(),
             "module_doc": (self.notebook and self.notebook.get("doc") or self.module_doc).strip(),
             "entry": self.entry,
             "imports": self.imports,
@@ -1183,6 +1823,7 @@ class GraphBuilder:
             "nodes": self.nodes,
             "edges": list(self.edges.values()),
             "notebook": notebook,
+            "tables": list(tables.values()),
         }
 
     def notebook_info(self):
@@ -1226,16 +1867,10 @@ def load_source(path: str) -> tuple[str, dict | None]:
 
 
 def parse_file(path: str) -> dict:
+    if Path(path).suffix.lower() == ".sql":
+        return sql_file_graph(path)
     source, nb = load_source(path)
-    try:
-        return GraphBuilder(source, path, nb).build()
-    except SyntaxError as e:
-        # Report a notebook error against its cell, not the flattened line number.
-        c = cell_of(nb, e.lineno) if nb and e.lineno else None
-        if c:
-            e.msg = f"{e.msg} in code cell {c['n']}" + (f" (In [{c['exec']}])" if c["exec"] is not None else "")
-            e.lineno = max(1, e.lineno - c["code_start"] + 1)
-        raise
+    return GraphBuilder(source, path, nb).build()
 
 
 def brief(graph: dict) -> str:
@@ -1251,6 +1886,14 @@ def brief(graph: dict) -> str:
             out.append(f"  WARNING run order differs from document order at code cells {nb['out_of_order']}")
         for f in nb["forward_refs"]:
             out.append(f"  WARNING {f['var']} is read in {f['node']} (code cell {f['cell']}) but only defined later in {f['defined_in']} (code cell {f['defined_cell']}): works in a live kernel, breaks on Restart & Run All")
+    if graph.get("modules"):
+        out += ["", "LOCAL MODULES (the script's own code, read by the parser; their functions appear as blocks/flows under the names below):"]
+        for m in graph["modules"]:
+            out.append(f"  {m['module']} ({m['file']}): imported {', '.join(m['imported']) or '-'}" + (f"; also pulled in {', '.join(k for k in m['adopted'] if k not in m['imported'])}" if len(m['adopted']) > len(m['imported']) else "") + (f" — {m['doc']}" if m.get('doc') else ""))
+    if graph.get("packages"):
+        out += ["", "PACKAGES (third-party / stdlib, with the blocks that use them):"]
+        for p in graph["packages"]:
+            out.append(f"  {p['name']}" + (f" {p['version']}" if p.get("version") else "") + (f" — {p['summary']}" if p.get("summary") else "") + (f" | used by {','.join(p['used_by'])}" if p["used_by"] else " | imported, not used at top level"))
     out += ["", "BLOCKS:"]
     for n in graph["nodes"]:
         bits = [f"{n['id']}", n["kind"], repr(n["title"]), f"lines {n['lines'][0]}-{n['lines'][1]}"]
@@ -1264,6 +1907,13 @@ def brief(graph: dict) -> str:
         for key in ("reads", "global_reads", "writes"):
             if n.get(key):
                 bits.append(f"{key}={','.join(n[key])}")
+        if n.get("packages"):
+            bits.append("uses=" + ",".join(n["packages"]))
+        if n.get("file") and graph.get("modules"):
+            bits.append(f"in {Path(n['file']).name}")
+        if n.get("sql"):
+            sq = n["sql"]
+            bits.append("SQL" + (f" {sq['dialect']}" if sq["dialect"] else "") + f" {sq['kind']}" + (f" reads={','.join(sq['reads'])}" if sq["reads"] else "") + (f" writes={','.join(sq['writes'])}" if sq["writes"] else ""))
         bits.append(f"role?={n.get('role', 'support')}")
         out.append("  " + " | ".join(bits))
         for o in (n.get("outputs") or [])[:3]:
@@ -1283,9 +1933,23 @@ def brief(graph: dict) -> str:
     for e in graph["edges"]:
         out.append(f"  {e['source']} -> {e['target']} [{e['kind']}]: {', '.join(e['vars'])}")
     flows = graph.get("flows") or {}
-    if flows:
+    sqlflows = {k: f for k, f in flows.items() if f.get("kind") == "sql"}
+    if sqlflows:
+        out += ["", "SQL QUERIES (the reader can open these in place; block ids are '<block>.sql/<id>': one block per CTE, 'out' is the final statement):"]
+        for name, f in sqlflows.items():
+            out.append(f"  {name}" + (f" [{f['dialect']}]" if f.get("dialect") else "") + (f" from file {f['file']}" if f.get("file") else ""))
+            for n in f["nodes"]:
+                if n["kind"] == "input":
+                    out.append(f"    source tables: {', '.join(n['writes'])}")
+                    continue
+                out.append(f"    {name}/{n['id']} | {n['title']!r} | reads={','.join(n['reads'])} | role?={n.get('role', 'support')}")
+    if graph.get("tables"):
+        out += ["", "TABLES (SQL): " + "; ".join(f"{t['name']} read by {','.join(t['read_by']) or '-'} written by {','.join(t['written_by']) or '-'}" for t in graph["tables"])]
+    if any(f.get("kind") != "sql" for f in flows.values()):
         out += ["", "FUNCTION FLOWS (the reader can open these in place; block ids are '<function>/<id>'):"]
         for name, f in flows.items():
+            if f.get("kind") == "sql":
+                continue
             out.append(f"  {name}({', '.join(f['params'])}) lines {f['lines'][0]}-{f['lines'][1]}")
             for n in f["nodes"]:
                 if n["kind"] == "input":
@@ -1314,6 +1978,19 @@ def main(argv=None):
         src, _ = load_source(args.script)
         for i, l in enumerate(src.splitlines(), 1):
             print(f"{i:4d}  {l}")
+        try:
+            g = parse_file(args.script)
+        except SyntaxError:
+            return 0
+        for m in g.get("modules") or []:
+            print(f"\n==== {m['file']} (module {m['module']}; only the functions this script pulls in) ====")
+            for key in m["adopted"]:
+                d = g["defs"].get(key)
+                if not d:
+                    continue
+                for i, l in enumerate(d["code"].splitlines(), d["lines"][0]):
+                    print(f"{i:4d}  {l}")
+                print()
         return 0
     try:
         graph = parse_file(args.script)

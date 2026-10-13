@@ -1,8 +1,8 @@
 {
   "name": "code-flow",
   "displayName": "Code Flow",
-  "description": "See a Python script or Jupyter notebook as a map of code blocks linked by the variables they pass. Chat with Claude Code about it, watch the map follow the debugger, export it as HTML.",
-  "version": "0.8.0",
+  "description": "See a Python script, notebook or SQL file as a map of code blocks linked by the variables and tables they pass \u2014 including the project's own modules and the CTEs inside queries. Chat with Claude Code about it, follow the debugger, export as HTML.",
+  "version": "0.9.0",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {
@@ -21,7 +21,10 @@
     "debugger",
     "chat",
     "jupyter",
-    "notebook"
+    "notebook",
+    "sql",
+    "bigquery",
+    "imports"
   ],
   "main": "./extension.js",
   "activationEvents": [],
@@ -49,50 +52,50 @@
       "editor/title": [
         {
           "command": "codeFlow.open",
-          "when": "resourceLangId == python",
+          "when": "resourceLangId == python || resourceLangId == sql",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "codeFlow.open",
-          "when": "resourceLangId == python",
+          "when": "resourceLangId == python || resourceLangId == sql",
           "group": "navigation@90"
         }
       ],
       "explorer/context": [
         {
           "command": "codeFlow.open",
-          "when": "resourceLangId == python || resourceExtname == .ipynb",
+          "when": "resourceLangId == python || resourceExtname == .ipynb || resourceExtname == .sql",
           "group": "navigation@90"
         },
         {
           "command": "codeFlow.explain",
-          "when": "resourceLangId == python || resourceExtname == .ipynb",
+          "when": "resourceLangId == python || resourceExtname == .ipynb || resourceExtname == .sql",
           "group": "navigation@91"
         },
         {
           "command": "codeFlow.chat",
-          "when": "resourceLangId == python || resourceExtname == .ipynb",
+          "when": "resourceLangId == python || resourceExtname == .ipynb || resourceExtname == .sql",
           "group": "navigation@92"
         }
       ],
       "commandPalette": [
         {
           "command": "codeFlow.open",
-          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
+          "when": "editorLangId == python || editorLangId == sql || notebookType == jupyter-notebook || resourceExtname == .ipynb || resourceExtname == .sql"
         },
         {
           "command": "codeFlow.explain",
-          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
+          "when": "editorLangId == python || editorLangId == sql || notebookType == jupyter-notebook || resourceExtname == .ipynb || resourceExtname == .sql"
         },
         {
           "command": "codeFlow.chat",
-          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
+          "when": "editorLangId == python || editorLangId == sql || notebookType == jupyter-notebook || resourceExtname == .ipynb || resourceExtname == .sql"
         },
         {
           "command": "codeFlow.export",
-          "when": "editorLangId == python || notebookType == jupyter-notebook || resourceExtname == .ipynb"
+          "when": "editorLangId == python || editorLangId == sql || notebookType == jupyter-notebook || resourceExtname == .ipynb || resourceExtname == .sql"
         }
       ],
       "notebook/toolbar": [

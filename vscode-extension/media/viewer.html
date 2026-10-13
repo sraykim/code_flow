@@ -17,7 +17,7 @@ body {
   --focus: var(--vscode-focusBorder, #2f6fdb);
   --edge: #8d8a80;
   --k-step: #2f6fdb; --k-code: #6c6960; --k-value: #b06f12; --k-helper: #7a57c9;
-  --k-control: #0e8478; --k-unused: #9a978e; --implicit: #d9480f; --fwd: #c2255c;
+  --k-control: #0e8478; --k-unused: #9a978e; --implicit: #d9480f; --fwd: #c2255c; --k-sql: #1971c2;
   --c-kw: #a626a4; --c-str: #3f8f3a; --c-num: #9a5b00; --c-com: #9a9a92;
   --c-fn: #2f6fdb; --c-bi: #b06f12; --c-local: #2f6fdb;
   --ui: var(--vscode-font-family, -apple-system, "Segoe UI", system-ui, sans-serif);
@@ -32,7 +32,7 @@ body {
     --border: var(--vscode-editorWidget-border, #34373d);
     --edge: #73716a;
     --k-step: #6ea1ff; --k-code: #9c998f; --k-value: #e0a43c; --k-helper: #a98bf0;
-    --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c; --fwd: #ff6b9d;
+    --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c; --fwd: #ff6b9d; --k-sql: #4dabf7;
     --c-kw: #c678dd; --c-str: #98c379; --c-num: #d19a66; --c-com: #7f848e;
     --c-fn: #61afef; --c-bi: #e5c07b; --c-local: #6ea1ff;
   }
@@ -41,7 +41,7 @@ body.vscode-dark, body.vscode-high-contrast {
   --panel: var(--vscode-editorWidget-background, #1d1f23);
   --edge: #73716a;
   --k-step: #6ea1ff; --k-code: #9c998f; --k-value: #e0a43c; --k-helper: #a98bf0;
-  --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c; --fwd: #ff6b9d;
+  --k-control: #3cc4b4; --k-unused: #6f6d67; --implicit: #ff8a4c; --fwd: #ff6b9d; --k-sql: #4dabf7;
   --c-kw: #c678dd; --c-str: #98c379; --c-num: #d19a66; --c-com: #7f848e;
   --c-fn: #61afef; --c-bi: #e5c07b; --c-local: #6ea1ff;
 }
@@ -49,6 +49,22 @@ body.vscode-dark, body.vscode-high-contrast {
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: var(--bg); color: var(--fg); font: 13px/1.4 var(--ui); }
 button { font: inherit; color: inherit; }
+
+/* ---------- SQL / imports ---------- */
+.badge.sql { background: color-mix(in srgb, var(--k-sql) 15%, transparent); color: var(--k-sql); }
+.chip.tb { border-style: dotted; color: var(--k-sql); }
+.chip.pk { color: var(--muted); border-style: dashed; }
+.origin { font: 11px var(--mono); color: var(--muted); margin-left: 6px; white-space: nowrap; }
+#edges .e.k-table path.line { stroke: var(--k-sql); stroke-dasharray: 8 3 2 3; stroke-width: 1.8; }
+#edges .e.k-table .lbl text { fill: var(--k-sql); }
+#edges .e.k-table.hot path.line { stroke: var(--k-sql); }
+.ibtn.openflow.q { color: var(--k-sql); border-color: color-mix(in srgb, var(--k-sql) 40%, transparent); }
+.t-sqlkw { color: var(--c-kw); font-weight: 600; } .t-sqlfn { color: var(--c-fn); }
+.drawer .pk-row { padding: 5px 12px; font-size: 12px; }
+.drawer .pk-row b { font: 600 12px var(--mono); } .drawer .pk-row .v { color: var(--muted); font: 11px var(--mono); margin-left: 6px; }
+.drawer .pk-row .d { color: var(--muted); } .drawer .pk-row .sum { margin: 2px 0 0; font-size: 12px; }
+.drawer .pk-row .u { margin-top: 2px; } .drawer .pk-row .u a { cursor: pointer; font: 11px var(--mono); color: var(--k-step); margin-right: 6px; }
+.drawer .pk-row.mod { border-left: 3px solid var(--k-helper); }
 
 /* ---------- notebooks ---------- */
 .cellno { font: 11px var(--mono); color: var(--k-value); margin-left: 6px; white-space: nowrap; }
@@ -397,7 +413,7 @@ body.vscode-dark, body.vscode-high-contrast { --k-sec: #4fb6c9; }
   <button class="mi" id="m-g-comments" role="menuitemradio"><span class="ck"></span>Banner comments in the script</button>
   <button class="mi" id="m-g-claude" role="menuitemradio"><span class="ck"></span>Claude's stages</button>
   <div class="sep"></div>
-  <button class="mi" id="m-drawer"><span class="ck"></span>Lookups &amp; imports…</button>
+  <button class="mi" id="m-drawer"><span class="ck"></span>Imports, tables &amp; lookups…</button>
 </div>
 <div class="overview" id="overview" hidden><span class="src" id="ov-src"></span><span id="ov-text" title="Click to show all"></span><span class="warn" id="ov-warn"></span><button class="x" id="ov-x" aria-label="Hide summary">×</button></div>
 <div id="chat" hidden>
@@ -408,7 +424,7 @@ body.vscode-dark, body.vscode-high-contrast { --k-sec: #4fb6c9; }
   <form class="chat-form" id="chat-form"><textarea id="chat-in" rows="1" placeholder="Ask about this script… (Enter to send, Shift+Enter for a new line)"></textarea><button class="btn primary" id="chat-send" type="submit">Send</button></form>
 </div>
 <div id="viewport"><div id="world"><div id="frames"></div><svg id="edges" xmlns="http://www.w3.org/2000/svg"></svg><div id="nodes"></div></div></div>
-<div class="drawer" id="drawer" hidden><h3><span>Lookups &amp; imports</span><button class="ibtn" id="drawer-x">close</button></h3><div id="drawer-body"></div></div>
+<div class="drawer" id="drawer" hidden><h3><span>Imports, tables &amp; lookups</span><button class="ibtn" id="drawer-x">close</button></h3><div id="drawer-body"></div></div>
 <button class="btn legend-btn" id="b-legend" aria-expanded="false">Legend</button>
 <div class="legend" id="legend" hidden></div>
 <div class="zoom"><button class="btn" id="z-out" aria-label="Zoom out">−</button><span id="z-val">100%</span><button class="btn" id="z-in" aria-label="Zoom in">+</button></div>
@@ -509,9 +525,21 @@ function tokenize(code) {
   }
   return out;
 }
-function highlight(code, firstLine) {
+const SQLKW = new Set("select from where join left right inner outer full cross on using with as and or not in is null group by order having limit offset union all distinct case when then else end insert into values update set delete create or replace table view temp temporary if exists drop truncate merge matched partition over window rows between unbounded preceding following current row qualify like ilike exists cast interval date timestamp asc desc returning recursive except intersect lateral unnest array struct".split(" "));
+const SQLTOKEN = /(--[^\n]*|\/\*[\s\S]*?\*\/)|('(?:''|[^'])*')|(`[^`]*`|"[^"\n]*")|(\b\d[\d.]*\b)|([A-Za-z_][\w$]*)|(\s+)|([^\sA-Za-z_\d])/g;
+function tokenizeSQL(code) {
+  const out = []; let m; SQLTOKEN.lastIndex = 0;
+  while ((m = SQLTOKEN.exec(code))) {
+    const t = m[0]; let cls = "";
+    if (m[1]) cls = "com"; else if (m[2]) cls = "str"; else if (m[3]) cls = "sqlfn"; else if (m[4]) cls = "num";
+    else if (m[5]) { if (SQLKW.has(t.toLowerCase())) cls = "sqlkw"; else if (/^\s*\(/.test(code.slice(SQLTOKEN.lastIndex))) cls = "sqlfn"; }
+    out.push([cls, t]);
+  }
+  return out;
+}
+function highlight(code, firstLine, lang) {
   const lines = [[]];
-  for (const [cls, text] of tokenize(code)) {
+  for (const [cls, text] of (lang === "sql" ? tokenizeSQL(code) : tokenize(code))) {
     const parts = text.split("\n");
     parts.forEach((p, i) => {
       if (i > 0) lines.push([]);
@@ -532,15 +560,17 @@ const niceTitle = (n) => (n.title_from === "code" ? n.title : cap(n.title));
 const isLeaf = (id) => NODES.has(id);
 const isCont = (id) => CONT.has(id);
 const cellAt = (line) => (G.notebook ? G.notebook.cells.find((c) => line >= c.lines[0] && line <= c.lines[1]) : null);
-function lineLink(start, end) {
-  const c = cellAt(start);
-  let label = end && end !== start ? `L${start}–${end}` : `L${start}`;
+function lineLink(start, end, file) {
+  const foreign = file && file !== G.file;
+  const c = foreign ? null : cellAt(start);
+  let label = (foreign ? file.split(/[\\/]/).pop() + " " : "") + (end && end !== start ? `L${start}–${end}` : `L${start}`);
   if (c) {
     const a = Math.max(1, start - c.code_start + 1), b = Math.max(a, (end || start) - c.code_start + 1);
     label = (c.exec != null ? `In [${c.exec}]` : `cell ${c.n}`) + (b > a ? ` L${a}–${b}` : a > 1 || b > 1 ? ` L${a}` : "");
   }
-  if (vscodeApi) return `<button class="ibtn loc" data-line="${start}" data-end="${end || start}" title="${c ? "Show this cell in the notebook" : "Show in editor"}">${label}</button>`;
+  if (vscodeApi) return `<button class="ibtn loc" data-line="${start}" data-end="${end || start}"${foreign ? ` data-file="${esc(file)}"` : ""} title="${c ? "Show this cell in the notebook" : foreign ? "Open " + esc(file.split(/[\\/]/).pop()) : "Show in editor"}">${label}</button>`;
   if (c) return `<span class="ibtn loc" title="Code cell ${c.n} of the notebook">${label}</span>`;
+  if (foreign) { const q = file.startsWith("/") ? file : "/" + file.replace(/\\/g, "/"); return `<a class="ibtn loc" href="vscode://file${encodeURI(q)}:${start}" title="Open in VS Code">${label}</a>`; }
   const p = G.file.startsWith("/") ? G.file : "/" + G.file.replace(/\\/g, "/");
   return `<a class="ibtn loc" href="vscode://file${encodeURI(p)}:${start}" title="Open in VS Code">${label}</a>`;
 }
@@ -564,7 +594,13 @@ function addLeaf(node, parent, key) {
 }
 function addCont(c) { CONT.set(c.id, c); parentOf.set(c.id, c.parent); keyOf.set(c.id, c.key); }
 const chromeOf = (c) => CHROME[c.synthetic ? "flat" : c.kind];
-function flowFor(node) { return node.def && G.flows && G.flows[node.def] ? G.flows[node.def] : null; }
+function flowFor(node) {
+  if (!node || !G.flows) return null;
+  if (node.def && G.flows[node.def]) return G.flows[node.def];
+  if (node.sql_flow && G.flows[node.sql_flow]) return G.flows[node.sql_flow];
+  return null;
+}
+const isSqlFlow = (f) => !!(f && f.kind === "sql");
 
 // Open a block's function flow: the block is replaced by a container holding the
 // function's own blocks (ids prefixed with the container id).
@@ -742,6 +778,8 @@ function computeExports() {
   for (const e of allLeafEdges(true)) { if (!exportedBy.has(e.source)) exportedBy.set(e.source, new Set()); e.vars.forEach((v) => exportedBy.get(e.source).add(v)); }
 }
 function outChips(n) {
+  if (n.lang === "sql" && n.writes && n.writes.length && !(exportedBy.get(n.id) || new Set()).size)
+    return `<span class="l">writes</span>` + n.writes.map((t) => `<span class="chip tb" data-table="${esc(t)}">${esc(t)}</span>`).join("");
   const ex = exportedBy.get(n.id) || new Set();
   const outs = (n.writes || []).filter((v) => ex.has(v)), locals = (n.writes || []).filter((v) => !ex.has(v));
   let h = chipsHTML("out", outs, "", "data-out");
@@ -752,13 +790,18 @@ function outChips(n) {
 function nodeHTML(n) {
   const d = n.def ? G.defs[n.def] : null;
   const en = noteOf(n);
-  const badge = n.kind === "branch" ? `<span class="badge q" title="Branch: one arm runs">?</span>` : `<span class="badge">${KIND_BADGE[n.kind] || n.kind}</span>`;
+  const badge = n.kind === "branch" ? `<span class="badge q" title="Branch: one arm runs">?</span>`
+    : n.sql && n.kind !== "step" ? `<span class="badge sql" title="This block runs SQL${n.sql.dialect ? " (" + n.sql.dialect + ")" : ""}">SQL${n.sql.queries > 1 ? " ×" + n.sql.queries : ""}</span>`
+    : n.lang === "sql" ? `<span class="badge sql">${n.id === "out" || n.innerId === "out" ? "result" : "cte"}</span>`
+    : `<span class="badge">${KIND_BADGE[n.kind] || n.kind}</span>`;
   let h = `<div class="nh">${badge}`;
-  if (d) h += `<span class="title mono">${esc(d.name)}</span><span class="sig">(${esc(d.params.join(", "))})</span>`;
-  else if (n.kind === "input") h += `<span class="title">Inputs</span><span class="grow"></span>`;
+  if (d) h += `<span class="title mono">${esc(d.name)}</span><span class="sig">(${esc(d.params.join(", "))})</span>` + (d.origin ? `<span class="origin" title="${esc(d.origin.module)}">${esc(d.origin.file.split(/[\\/]/).pop())}</span>` : "");
+  else if (n.kind === "input") h += `<span class="title">${n.sql_tables ? "Source tables" : "Inputs"}</span><span class="grow"></span>`;
   else h += `<span class="title${n.title_from === "code" || n.kind === "branch" ? " mono" : ""}">${esc(niceTitle(n))}</span><span class="grow"></span>`;
-  h += lineLink(n.lines[0], n.lines[1]);
-  if (d && flowFor(n)) h += `<button class="ibtn openflow" title="Show this function's own flow in place">Open flow ▸</button>`;
+  h += lineLink(n.lines[0], n.lines[1], n.file);
+  const fl = flowFor(n);
+  if (fl && d) h += `<button class="ibtn openflow" title="Show this function's own flow in place">Open flow ▸</button>`;
+  else if (fl && isSqlFlow(fl)) h += `<button class="ibtn openflow q" title="Show the query as a flow: one block per CTE">Open query ▸</button>`;
   if (n.kind !== "branch" && n.kind !== "input") {
     h += `<button class="ibtn tog" title="Fold / unfold code" aria-label="Fold code">▾</button>`;
     h += `<button class="ibtn full" title="Show the whole block without scrolling" aria-label="Full height">⤢</button>`;
@@ -782,18 +825,23 @@ function nodeHTML(n) {
     outChips(n),
     chipsHTML("lookup", n.lookups, "lk", "data-lookup"),
   ];
+  if (n.sql) {
+    if (n.sql.reads.length) parts.push(`<span class="l">tables</span>` + n.sql.reads.map((t) => `<span class="chip tb" data-table="${esc(t)}" title="Table read by this query">${esc(t)}</span>`).join(""));
+    if (n.sql.writes.length) parts.push(`<span class="l">writes</span>` + n.sql.writes.map((t) => `<span class="chip tb" data-table="${esc(t)}" title="Table written by this query">${esc(t)}</span>`).join(""));
+  }
   const helpers = (n.refs || []).filter((r) => G.defs[r]);
   if (helpers.length) parts.push(`<span class="l">uses</span>` + helpers.map((r) => `<span class="chip h" data-fn="${esc(r)}">${esc(r)}()</span>`).join(""));
+  if (n.packages && n.packages.length) parts.push(`<span class="l">${helpers.length ? "" : "uses"}</span>` + n.packages.map((p) => `<span class="chip pk" data-pkg="${esc(p)}" title="Package used here — click for details">${esc(p)}</span>`).join(""));
   const io = parts.filter(Boolean);
   if (io.length) h += `<div class="io">${io.join('<span class="sep"></span>')}</div>`;
   if (n.kind === "input") return h;
   if (n.kind === "step") {
-    h += `<div class="callsite"><div class="cap">called at line ${n.lines[0]}</div>${highlight(n.call, n.lines[0])}</div>`;
-    h += `<div class="body">${highlight(d.code, d.lines[0])}</div>`;
+    h += `<div class="callsite"><div class="cap">called at ${cellAt(n.lines[0]) ? lineLink(n.lines[0]).replace(/<[^>]+>/g, "") : "line " + n.lines[0]}</div>${highlight(n.call, n.lines[0])}</div>`;
+    h += (d.origin ? `<div class="cap" style="padding:4px 8px 0;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">defined in ${esc(d.origin.file.split(/[\\/]/).pop())} ${lineLink(d.lines[0], d.lines[1], d.origin.file)}</div>` : "") + `<div class="body">${highlight(d.code, d.lines[0])}</div>`;
   } else if (n.kind === "helper" || n.kind === "unused") {
     h += `<div class="body">${highlight(d.code, d.lines[0])}</div>`;
   } else {
-    h += `<div class="body">${highlight(n.code, n.lines[0])}</div>`;
+    h += `<div class="body">${highlight(n.code, n.lines[0], n.lang)}</div>`;
   }
   if (n.outputs && n.outputs.length) {
     h += `<div class="outp"><div class="cap">output</div>` + n.outputs.map((o) =>
@@ -837,6 +885,11 @@ function frameHTML(c) {
   if (c.kind === "entry") {
     return `<div class="fh"><span class="badge">main</span><span class="title">${esc(c.title)}()</span><span class="sig">the program: this function's body is the pipeline</span>` +
       `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="hid"></span><span class="grow"></span></div>`;
+  }
+  if (c.kind === "flow" && isSqlFlow(c.flow)) {
+    return `<div class="fh"><span class="badge sql">SQL</span><span class="title">query${c.flow.dialect ? " · " + esc(c.flow.dialect) : ""}</span><span class="sig">${c.flow.file ? esc(c.flow.file.split(/[\\/]/).pop()) : "one block per CTE"}</span>` +
+      `<span class="lines">L${c.lines[0]}–${c.lines[1]}</span><span class="hid"></span><span class="grow"></span>` +
+      `<button class="ibtn collapse" title="Back to the single block">Collapse ▴</button></div>`;
   }
   if (c.kind === "flow") {
     return `<div class="fh"><span class="badge">ƒ</span><span class="title">${esc(c.title)}</span><span class="sig">(${esc(c.params.join(", "))})</span>` +
@@ -926,8 +979,10 @@ function buildAll() {
   const nl = G.edges.filter((e) => e.kind === "lookup").length, ng = G.edges.filter((e) => e.kind === "global").length;
   const real = allSections.filter((c) => !c.synthetic).length;
   const hidden = [nl && `${nl} lookup`, ng && !showGlobals && `${ng} global`].filter(Boolean).join(", ");
-  $("stats").textContent = (G.notebook ? `notebook · ${G.notebook.code_cells} cells · ` : "") + (G.entry ? `pipeline = ${G.entry.name}() · ` : "") + (real ? `${real} sections · ` : "") +
-    `${G.nodes.length} blocks · ${G.edges.length - nl - (showGlobals ? 0 : ng)} arrows` + (hidden ? ` · ${hidden} as tags` : "");
+  const npk = (G.packages || []).filter((p) => !p.stdlib).length, nmod = (G.modules || []).length, ntb = (G.tables || []).length;
+  $("stats").textContent = (G.sql_file ? `SQL${G.sql.dialect ? " · " + G.sql.dialect : ""} · ` : "") + (G.notebook ? `notebook · ${G.notebook.code_cells} cells · ` : "") + (G.entry ? `pipeline = ${G.entry.name}() · ` : "") + (real ? `${real} sections · ` : "") +
+    `${G.nodes.length} blocks · ${G.edges.length - nl - (showGlobals ? 0 : ng)} arrows` + (hidden ? ` · ${hidden} as tags` : "") +
+    (nmod ? ` · ${nmod} module${nmod > 1 ? "s" : ""}` : "") + (npk ? ` · ${npk} package${npk > 1 ? "s" : ""}` : "") + (ntb ? ` · ${ntb} table${ntb > 1 ? "s" : ""}` : "");
   $("seg-level").hidden = !real;
   const summary = (E && E.summary) || G.module_doc;
   const warns = [];
@@ -952,9 +1007,20 @@ function buildAll() {
 function buildDrawer() {
   const lk = (G.lookups || []).map((l) =>
     `<div class="lk-row" data-node="${l.node}"><code>${esc(l.name)}</code><span class="m">L${l.line} · used by ${l.used_by} blocks</span></div>`).join("");
+  const pkgNote = (name) => (E && E.packages && E.packages[name] && E.packages[name].summary) || "";
+  const mods = (G.modules || []).map((m) => `<div class="pk-row mod"><b>${esc(m.module)}</b><span class="v">${esc(m.file.split(/[\\/]/).pop())}</span>` +
+    (m.doc ? `<div class="d">${esc(m.doc)}</div>` : "") +
+    `<div class="u">${m.adopted.map((k) => `<a data-fnjump="${esc(k)}">${esc(k)}</a>`).join("")}</div></div>`).join("");
+  const pkgs = (G.packages || []).map((p) => `<div class="pk-row" data-pkgrow="${esc(p.name)}"><b>${esc(p.name)}</b>${p.version ? `<span class="v">${esc(p.version)}</span>` : ""}` +
+    (p.summary ? `<div class="d">${esc(p.summary)}</div>` : "") + (pkgNote(p.name) ? `<div class="sum">${esc(pkgNote(p.name))}</div>` : "") +
+    (p.used_by.length ? `<div class="u">${p.used_by.map((id) => `<a data-node="${id}">${id}</a>`).join("")}</div>` : `<div class="d">imported, not used in a block</div>`) + `</div>`).join("");
+  const tables = (G.tables || []).map((t) => `<div class="lk-row" data-node="${(t.written_by[0] || t.read_by[0]) || ""}"><code>${esc(t.name)}</code><span class="m">${t.written_by.length ? "written by " + t.written_by.join(", ") + " · " : ""}read by ${t.read_by.join(", ") || "–"}</span></div>`).join("");
   $("drawer-body").innerHTML =
-    `<section><p class="hint">Lookups are values or helpers used almost everywhere. They show as dotted tags on blocks instead of arrows (View ▸ Show lookups as arrows to draw them).</p>${lk || `<p class="hint">None in this script.</p>`}</section>` +
-    `<h3><span>Imports (${G.imports.length})</span></h3><section>${G.imports.map((i) => highlight(i.code, i.line)).join("") || `<p class="hint">No imports.</p>`}</section>`;
+    (mods ? `<h3><span>Project modules (${G.modules.length})</span></h3><section><p class="hint">Imported from the project's own code and read by the parser: their functions are blocks here, with their code.</p>${mods}</section>` : "") +
+    `<h3><span>Packages (${(G.packages || []).length})</span></h3><section>${pkgs || `<p class="hint">No imports.</p>`}</section>` +
+    (tables ? `<h3><span>Tables (SQL)</span></h3><section>${tables}</section>` : "") +
+    `<h3><span>Lookups</span></h3><section><p class="hint">Values or helpers used almost everywhere. They show as dotted tags on blocks instead of arrows (View ▸ Show lookups as arrows to draw them).</p>${lk || `<p class="hint">None in this script.</p>`}</section>` +
+    `<h3><span>Import lines (${G.imports.length})</span></h3><section>${G.imports.map((i) => highlight(i.code, i.line)).join("") || `<p class="hint">No imports.</p>`}</section>`;
 }
 function applyVisibility() {
   for (const [id, el] of els) el.hidden = visId(id) !== id || isHidden(id);
@@ -1133,7 +1199,7 @@ function place() {
 function drawEdges() {
   const svg = $("edges"); svg.textContent = "";
   const defs = document.createElementNS(SVGNS, "defs");
-  for (const [k, v] of [["data", "--edge"], ["global", "--edge"], ["lookup", "--edge"], ["calls", "--k-helper"], ["implicit", "--implicit"], ["branch", "--k-control"], ["forward", "--fwd"], ["hot", "--focus"]]) {
+  for (const [k, v] of [["data", "--edge"], ["global", "--edge"], ["lookup", "--edge"], ["calls", "--k-helper"], ["implicit", "--implicit"], ["branch", "--k-control"], ["forward", "--fwd"], ["table", "--k-sql"], ["hot", "--focus"]]) {
     const m = document.createElementNS(SVGNS, "marker");
     m.setAttribute("id", "ar-" + k); m.setAttribute("viewBox", "0 0 10 10"); m.setAttribute("refX", "9"); m.setAttribute("refY", "5");
     m.setAttribute("markerWidth", "7"); m.setAttribute("markerHeight", "7"); m.setAttribute("orient", "auto-start-reverse");
@@ -1431,7 +1497,10 @@ function setupInteraction() {
     if (t.closest(".tog")) { nodeEl.classList.toggle("collapsed"); return; }
     if (t.closest(".full")) { nodeEl.classList.toggle("full"); return; }
     const loc = t.closest("button.loc");
-    if (loc && vscodeApi) { vscodeApi.postMessage({ type: "reveal", line: +loc.dataset.line, end: +loc.dataset.end }); return; }
+    if (loc && vscodeApi) { vscodeApi.postMessage({ type: "reveal", line: +loc.dataset.line, end: +loc.dataset.end, file: loc.dataset.file || undefined }); return; }
+    const pk = t.closest("[data-pkg]"); if (pk) { $("drawer").hidden = false; const row = $("drawer-body").querySelector(`[data-pkgrow="${CSS.escape(pk.dataset.pkg)}"]`); if (row) row.scrollIntoView({ block: "center" }); return; }
+    const tb = t.closest("[data-table]");
+    if (tb) { const name = tb.dataset.table.toLowerCase(); const other = [...NODES.values()].find((x) => x.id !== id && x.sql && (x.sql.writes.some((w) => w.toLowerCase() === name) || x.sql.reads.some((w) => w.toLowerCase() === name)) && visId(x.id) === x.id); if (other) focusNode(other.id); return; }
     if (t.closest("a.loc")) return;
     const fn = t.closest("[data-fn]");
     if (fn) { jumpToDef(fn.dataset.fn, id); return; }
@@ -1488,8 +1557,12 @@ function setupToolbar() {
   $("m-g-comments").onclick = () => setGroup("comments");
   $("m-g-claude").onclick = () => setGroup("claude");
   $("m-drawer").onclick = () => { $("drawer").hidden = false; closeMenu(); };
+  $("stats").style.cursor = "pointer"; $("stats").title = "Packages, modules, tables, lookups"; $("stats").onclick = () => { $("drawer").hidden = !$("drawer").hidden; };
   $("drawer-x").onclick = () => { $("drawer").hidden = true; };
-  $("drawer-body").addEventListener("click", (ev) => { const r = ev.target.closest("[data-node]"); if (r) focusNode(r.dataset.node); });
+  $("drawer-body").addEventListener("click", (ev) => {
+    const j = ev.target.closest("[data-fnjump]"); if (j) { jumpToDef(j.dataset.fnjump, null); return; }
+    const r = ev.target.closest("[data-node]"); if (r && r.dataset.node) focusNode(r.dataset.node);
+  });
   $("b-legend").onclick = () => { const l = $("legend"); l.hidden = !l.hidden; $("b-legend").setAttribute("aria-expanded", String(!l.hidden)); };
   $("ov-x").onclick = () => { overviewClosed = true; $("overview").hidden = true; };
   $("ov-warn").addEventListener("click", (ev) => { const a = ev.target.closest("[data-go]"); if (a) { ev.stopPropagation(); focusNode(a.dataset.go); } });
@@ -1530,9 +1603,9 @@ function setupToolbar() {
     $("b-explain").hidden = false; $("b-explain").onclick = () => vscodeApi.postMessage({ type: "explain" });
     $("b-export").hidden = false; $("b-export").onclick = () => vscodeApi.postMessage({ type: "export", positions: { ...savedState(), chat: false, exported: Date.now() } });
   }
-  const kinds = [["step", "main(): the program"], ["sec", "section (Open ▸)"], ["helper", "function (Open flow ▸)"], ["step", "function call"], ["code", "top-level code"], ["value", "settings / inputs"], ["control", "branch: one arm runs"]];
+  const kinds = [["step", "main(): the program"], ["sec", "section (Open ▸)"], ["helper", "function (Open flow ▸)"], ["sql", "SQL (Open query ▸)"], ["step", "function call"], ["code", "top-level code"], ["value", "settings / inputs"], ["control", "branch: one arm runs"]];
   const lines = [["--edge", "variable passed on", ""], ["--k-control", "branch arm", ""], ["--k-helper", "calls helper", "2 4"], ["--implicit", "Claude: hidden link", "7 4"],
-                 ["--edge", "global read (View ▾ to show)", "5 4"], ["--fwd", "notebook: defined in a later cell", "3 3"], ["--focus", "direct link of the selected block", ""], ["--k-value", "debugger: path taken", ""]];
+                 ["--edge", "global read (View ▾ to show)", "5 4"], ["--fwd", "notebook: defined in a later cell", "3 3"], ["--k-sql", "SQL: table written, then read", "8 3 2 3"], ["--focus", "direct link of the selected block", ""], ["--k-value", "debugger: path taken", ""]];
   const sw = (c, dash) => `<svg viewBox="0 0 26 8"><line x1="0" y1="4" x2="26" y2="4" style="stroke:var(${c});stroke-width:2;stroke-dasharray:${dash}"/></svg>`;
   $("legend").innerHTML = kinds.map(([k, l]) => `<span class="it" data-k="${k}"><span class="sw"></span>${l}</span>`).join("") +
     `<span class="it"><span class="chip lk">NAME</span>lookup: tag, no arrow</span>` +
@@ -1603,7 +1676,7 @@ function mdLite(text) {
     });
     h = h.replace(/\*\*([^*]+)\*\*/g, (m, b) => keep(`<b>${b}</b>`));
     h = h.replace(/\b(lines? )(\d+)(?:\s*[–-]\s*(\d+))?/gi, (m, w, a, b) => keep(lineLnk(m, a, b)));
-    h = h.replace(/\b([A-Za-z_]\w*\/)?([nhb]\d+)\b/g, (m) => (ids.has(m) ? keep(blk(m)) : m));
+    h = h.replace(/\b((?:[A-Za-z_][\w.]*\/)?(?:[nhb]\d+|out|c\d+)(?:\.sql\/(?:c\d+|out|in))?)\b/g, (m) => (ids.has(m) ? keep(blk(m)) : m));
     return h.replace(/\u0000(\d+)\u0000/g, (m, i) => hold[+i]);
   };
   const parts = text.split(/```\w*\n?/); let h = "";
@@ -1662,8 +1735,10 @@ function goTo(id) {
   const fname = id.slice(0, i), inner = id.slice(i + 1);
   const already = [...CONT.values()].find((c) => c.kind === "flow" && c.title === fname);
   if (already) { focusNode(already.id + "/" + inner); return; }
-  const block = [...NODES.values()].find((n) => n.def === fname && !n.inFlow) || [...NODES.values()].find((n) => n.def === fname);
+  const owns = (n) => n.def === fname || n.sql_flow === fname;
+  const block = [...NODES.values()].find((n) => owns(n) && !n.inFlow) || [...NODES.values()].find(owns);
   if (!block) return;
+  if (block.inFlow) { focusNode(block.id); }
   const cid = openFlow(block.id); if (!cid) return;
   refresh(parentOf.get(block.id));
   requestAnimationFrame(() => focusNode(cid + "/" + inner));
@@ -1707,18 +1782,20 @@ function locateFrames(frames) {
   // frames: innermost first. Walk from the outermost frame in this file inward: the first mapped frame gives the
   // top-level block; each deeper frame inside a function with a flow opens that flow (from the block that called it)
   // and narrows the target to the inner block. Returns { top, target, opened } or null when nothing maps.
-  const fr = frames.slice().reverse(), top = G.nodes;
+  const fr = frames.slice().reverse(), top = G.nodes.filter((n) => !n.file);
   const plain = top.filter((n) => n.kind !== "helper" && n.kind !== "unused" && n.kind !== "input");
+  const sameFile = (a, b) => !a || !b || a === b || a.toLowerCase() === b.toLowerCase();
   let i = 0, topId = null;
   for (; i < fr.length; i++) {
+    if (fr[i].file && !sameFile(fr[i].file, G.file)) continue;
     const n = nodeAtLine(plain, fr[i].line) || nodeAtLine(top, fr[i].line);
     if (n) { topId = n.id; i++; break; }
   }
   if (!topId) return null;
   let target = topId, cid = null, opened = false;
   for (; i < fr.length; i++) {
-    const line = fr[i].line;
-    const fe = Object.entries(G.flows || {}).find(([, f]) => line >= f.lines[0] && line <= f.lines[1]);
+    const line = fr[i].line, ffile = fr[i].file || G.file;
+    const fe = Object.entries(G.flows || {}).find(([, f]) => !isSqlFlow(f) && sameFile(f.file || G.file, ffile) && line >= f.lines[0] && line <= f.lines[1]);
     if (!fe) continue;                               // a function without a flow: stay on the caller's block
     const [fname, f] = fe;
     const cur = NODES.get(target);
@@ -1783,8 +1860,8 @@ function paintDebug() {
 function tracePoints() {
   // First line of every block, so the debugger stops once per block.
   const lines = new Set();
-  for (const n of G.nodes) if (n.lines && n.kind !== "helper" && n.kind !== "unused" && n.kind !== "input") lines.add(n.lines[0]);
-  for (const f of Object.values(G.flows || {})) for (const n of f.nodes) if (n.lines && n.kind !== "input") lines.add(n.lines[0]);
+  for (const n of G.nodes) if (n.lines && n.kind !== "helper" && n.kind !== "unused" && n.kind !== "input" && !n.file) lines.add(n.lines[0]);
+  for (const f of Object.values(G.flows || {})) if (!isSqlFlow(f) && !f.file) for (const n of f.nodes) if (n.lines && n.kind !== "input") lines.add(n.lines[0]);
   return [...lines].sort((a, b) => a - b);
 }
 function setupDebug() {

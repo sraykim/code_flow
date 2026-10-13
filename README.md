@@ -19,6 +19,14 @@ the output, writes, calls) are drawn in full, support blocks folded, and minor o
 counters) hidden behind a count until you ask for them (`M`). The parser guesses roles; Explain refines them
 and sizes its notes accordingly.
 
+**Imports and SQL.** Functions imported from the project's own modules are read by the parser and appear as
+real step blocks with their code and an openable flow, tagged with the file they come from; third-party
+packages are listed with version, description and the blocks that use them (and Claude's note on what the
+script uses them for). SQL in strings, f-strings, `.sql` files and `%%sql`/`%%bigquery` cells is parsed:
+blocks show the tables they read and write, **Open query ▸** expands a query into one block per CTE, a
+table written by one block and read by another becomes a dash-dot arrow, and a standalone `.sql` file opens
+as its own CTE map. No SQL dependency is needed; `sqlglot`, if installed, sharpens the table list.
+
 Jupyter notebooks (`.ipynb`) work the same way: code cells are read in document order, markdown headings
 become sections, each cell's output (text, tables, images, errors) is shown under its block, line links
 point at cells, and the map flags the two notebook traps — cells run out of document order, and names used
@@ -56,7 +64,7 @@ Updates: `claude plugin marketplace update code-flow` then `claude plugin update
 
 **VS Code extension**
 ```
-code --install-extension dist/code-flow-0.8.0.vsix
+code --install-extension dist/code-flow-0.9.0.vsix
 ```
 Open a `.py` file → click the Code Flow icon in the editor title bar (or right-click → *Code Flow: Visualize Script*).
 Needs Python 3.8+ (standard library only). For explanations, Claude Code must be installed and signed in;

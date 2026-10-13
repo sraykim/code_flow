@@ -34,6 +34,7 @@ function activate(context) {
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (panels.has(doc.uri.fsPath)) refresh(context, doc.uri.fsPath);
+      else for (const st of panels.values()) if ((st.graph && st.graph.files || []).some((f) => samePath(f, doc.uri.fsPath))) refresh(context, st.file);
     }),
     vscode.workspace.onDidSaveNotebookDocument((doc) => {
       if (panels.has(doc.uri.fsPath)) refresh(context, doc.uri.fsPath);
@@ -59,8 +60,8 @@ function resolveFile(uri) {
   }
   if (u && u.scheme === "vscode-notebook-cell") u = vscode.Uri.file(u.fsPath);
   const ext = u ? path.extname(u.fsPath).toLowerCase() : "";
-  if (!u || u.scheme !== "file" || (ext !== ".py" && ext !== ".ipynb")) {
-    vscode.window.showWarningMessage("Code Flow: open or select a Python file (.py) or notebook (.ipynb) first.");
+  if (!u || u.scheme !== "file" || (ext !== ".py" && ext !== ".ipynb" && ext !== ".sql")) {
+    vscode.window.showWarningMessage("Code Flow: open or select a Python file (.py), a notebook (.ipynb) or a .sql file first.");
     return null;
   }
   return u.fsPath;
@@ -164,7 +165,7 @@ function post(st, msg) {
 
 async function onMessage(context, st, m) {
   if (!m || typeof m !== "object") return;
-  if (m.type === "reveal") reveal(st.file, m.line, m.end);
+  if (m.type === "reveal") reveal(m.file && m.file !== st.file ? m.file : st.file, m.line, m.end, st);
   else if (m.type === "positions") context.workspaceState.update("pos:" + st.file, m.positions);
   else if (m.type === "explain") explain(context, st.file);
   else if (m.type === "chat") chat(context, st, m);
@@ -199,10 +200,10 @@ async function exportHtml(context, st, positions) {
   else if (open) vscode.commands.executeCommand("revealFileInOS", target);
 }
 
-async function reveal(file, line, end) {
+async function reveal(file, line, end, st) {
   const uri = vscode.Uri.file(file);
-  const st = panels.get(file);
-  if (isNotebook(file) && st) {
+  st = st || panels.get(file);
+  if (isNotebook(file) && st && samePath(st.file, file)) {
     const c = graphCell(st, line || 1);
     if (!c) return;
     try {
@@ -352,7 +353,11 @@ function cleanEnrichment(raw, graph) {
   const secIds = new Set((graph.sections || []).map((x) => x.id));
   const strList = (x) => (Array.isArray(x) ? x.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 20) : []);
   const out = { source_hash: graph.source_hash, summary: typeof raw.summary === "string" ? raw.summary : "",
-    inputs: strList(raw.inputs), outputs: strList(raw.outputs), sections: {}, nodes: {}, stages: [], functions: {}, implicit_edges: [] };
+    inputs: strList(raw.inputs), outputs: strList(raw.outputs), sections: {}, nodes: {}, stages: [], functions: {}, implicit_edges: [], packages: {} };
+  const pkgs = new Set((graph.packages || []).map((p) => p.name));
+  for (const [name, v] of Object.entries(raw.packages || {})) {
+    if (pkgs.has(name) && v && typeof v.summary === "string" && v.summary.trim()) out.packages[name] = { summary: v.summary.trim() };
+  }
   for (const [id, v] of Object.entries(raw.sections || {})) {
     if (secIds.has(id) && v && typeof v.summary === "string") {
       out.sections[id] = { summary: v.summary };
@@ -519,7 +524,9 @@ function debugTracker(session) {
           frames = (r && r.stackFrames) || [];
         } catch (_) { return; }
         for (const st of panels.values()) {
-          const mine = isNotebook(st.file) ? notebookFrames(st, frames) : frames.filter((f) => f.source && samePath(f.source.path, st.file)).map((f) => ({ line: f.line }));
+          const files = (st.graph && st.graph.files) || [st.file];
+          const mine = isNotebook(st.file) ? notebookFrames(st, frames)
+            : frames.filter((f) => f.source && files.some((x) => samePath(f.source.path, x))).map((f) => ({ line: f.line, file: files.find((x) => samePath(f.source.path, x)) }));
           if (!mine.length) continue;
           if (!st.debugging) { st.debugging = true; post(st, { type: "debug", event: "start" }); }
           post(st, { type: "debug", event: "stopped", frames: mine });

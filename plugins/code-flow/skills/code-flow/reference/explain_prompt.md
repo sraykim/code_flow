@@ -16,6 +16,7 @@ Return ONE JSON object and nothing else (no prose, no code fence), with this sha
     "<function>/<block id>": { "role": "...", "summary": "..." }
   },
   "stages": [ { "name": "Classify", "summary": "one sentence", "nodes": ["<block id>", "..."] } ],
+  "packages": { "<package name from the PACKAGES list>": { "summary": "one sentence: what this package does FOR THIS SCRIPT — the specific calls that matter and where" } },
   "implicit_edges": [ { "source": "<block id>", "target": "<block id>", "label": "short name, e.g. a file name", "reason": "one sentence" } ]
 }
 
@@ -43,6 +44,8 @@ How to write a key block summary (this is what readers judge you on):
 Other rules:
 - "nodes" must have one entry for EVERY id in the BLOCKS list AND every '<function>/<id>' in the FUNCTION FLOWS list (the brief says how many in total; an entry per id is required, minor ones are only a few words). Use only ids that appear there. Give every section a summary and for every section if a SECTIONS list is given (otherwise "sections" is {}). "watch" is optional; omit it when there is nothing non-obvious.
 - If the brief has an ENTRY line, the top-level blocks are the body of that function; summarise them as the steps of the program.
+- SQL QUERIES blocks are keyed by '<block>.sql/<id>' (one per CTE, 'out' for the final statement). Summarise a CTE as what rows it keeps and what it computes (joins, filters, window functions, grain); for 'out' say what is produced or written where. Use the TABLES list to note when a block reads a table another block wrote.
+- LOCAL MODULES: functions pulled in from the project's own modules are ordinary blocks/flows here (their ids look like any other); their code is in the SCRIPT section after the main file. PACKAGES: write "packages" entries only for packages that matter to understanding the script (skip sys/os/pathlib-style plumbing); say what the script uses them for, not what they are in general.
 - FUNCTION FLOWS blocks are keyed by their '<function>/<id>' ids. The reader sees them when they open a function in place, so these are where the detailed rules belong (which arm runs when, what each step filters or computes). Blocks marked arm[...] only run in that branch; blocks marked returns produce the function's result.
 - stages: your own grouping of the blocks into 3-8 steps of the pipeline, in order, with short names (1-3 words). Every block belongs to exactly one stage. Good stages follow the data, e.g. Load, Signals, Classify, Metrics, Report, Write files; keep helpers with the stage that uses them most. The reader can switch between the banner sections and your stages, so make them useful even when banner sections exist.
 - implicit_edges: only real dependencies that the EDGES list is missing, for example:
