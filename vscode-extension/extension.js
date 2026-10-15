@@ -347,18 +347,35 @@ function savedEnrichment(context, st) {
 function claudeCandidates() {
   const configured = vscode.workspace.getConfiguration("codeFlow").get("claudePath");
   const home = os.homedir();
-  const list = [configured || "claude"];
-  // GUI-launched editors often miss shell PATH entries; try the usual install spots.
-  for (const p of [
+  const list = configured ? [configured] : [];
+  const win = process.platform === "win32";
+  // GUI-launched editors often miss shell PATH entries; try the usual install spots first.
+  const spots = win ? [
+    path.join(process.env.APPDATA || "", "npm", "claude.cmd"),
+    path.join(home, ".local", "bin", "claude.exe"),
+    path.join(home, ".claude", "local", "claude.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "claude-code", "claude.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Claude Code", "claude.exe"),
+    path.join(process.env.ProgramFiles || "", "nodejs", "claude.cmd"),
+  ] : [
     path.join(home, ".claude", "local", "claude"),
     path.join(home, ".local", "bin", "claude"),
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
-  ]) {
-    if (fs.existsSync(p) && !list.includes(p)) list.push(p);
-  }
+  ];
+  for (const p of spots) if (p && fs.existsSync(p) && !list.includes(p)) list.push(p);
+  // Ask the OS where it would find it (covers PATH entries the editor's process missed).
+  try {
+    const found = cp.execSync(win ? "where claude" : "command -v claude", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000 })
+      .split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (const f of found) if (!list.includes(f)) list.push(f);
+  } catch (_) { /* not on PATH */ }
+  if (!list.includes("claude")) list.push("claude");
   return list;
 }
+
+// cmd.exe reports a missing program with a message and exit code, not ENOENT.
+const isMissingProgram = (e) => (e && e.code === "ENOENT") || /is not recognized as an internal or external command|not found|No such file/i.test(String(e && e.message || ""));
 
 function runClaude(bin, prompt, cwd, token, extraArgs = [], onChild = null) {
   const cfg = vscode.workspace.getConfiguration("codeFlow");
@@ -366,7 +383,8 @@ function runClaude(bin, prompt, cwd, token, extraArgs = [], onChild = null) {
   const model = cfg.get("claudeModel");
   if (model) args.push("--model", model);
   return new Promise((resolve, reject) => {
-    const child = cp.spawn(bin, args, { cwd, shell: process.platform === "win32", env: process.env });
+    const useShell = process.platform === "win32" && !/\.exe$/i.test(bin);
+    const child = cp.spawn(useShell ? `"${bin}"` : bin, args, { cwd, shell: useShell, env: process.env, windowsHide: true });
     if (onChild) onChild(child);
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     let out = "", err = "", done = false;
@@ -456,9 +474,10 @@ async function explain(context, file) {
             return await runClaude(bin, prompt, path.dirname(file), token);
           } catch (e) {
             lastErr = e;
-            if (e.code !== "ENOENT") throw e;
+            if (!isMissingProgram(e)) throw e;
           }
         }
+        if (lastErr && !lastErr.code) lastErr.code = "ENOENT";
         throw lastErr;
       }
     );
@@ -477,7 +496,7 @@ async function explain(context, file) {
   } catch (e) {
     const missing = e && e.code === "ENOENT";
     const msg = missing
-      ? "Claude Code CLI not found. Install Claude Code and run `claude` once to sign in, or set codeFlow.claudePath. The parser's map still works without it."
+      ? "Claude Code CLI not found. Install Claude Code (npm install -g @anthropic-ai/claude-code) and run `claude` once to sign in; if it is installed, restart VS Code so it sees the updated PATH, or set codeFlow.claudePath to the full path (Windows: usually %APPDATA%\\npm\\claude.cmd). The parser's map still works without it."
       : `Claude Code could not explain this script: ${(e && e.message) || e}`;
     post(st, { type: "status", text: missing ? "Claude Code not found: showing the parser's map only" : "Explain failed: see notification", error: true });
     if (!(e && e.message === "Cancelled")) vscode.window.showWarningMessage("Code Flow: " + msg);
@@ -537,10 +556,10 @@ async function chat(context, st, m) {
         break;
       } catch (e) {
         lastErr = e;
-        if (e.code !== "ENOENT") throw e;
+        if (!isMissingProgram(e)) throw e;
       }
     }
-    if (raw == null) throw lastErr;
+    if (raw == null) { if (lastErr && !lastErr.code) lastErr.code = "ENOENT"; throw lastErr; }
     c.started = true;
     let text = raw;
     try {
@@ -554,7 +573,7 @@ async function chat(context, st, m) {
     post(st, { type: "chatReply", text: String(text).trim() });
   } catch (e) {
     const missing = e && e.code === "ENOENT";
-    post(st, { type: "chatReply", error: missing ? "Claude Code CLI not found. Install Claude Code and run `claude` once to sign in, or set codeFlow.claudePath." : String((e && e.message) || e) });
+    post(st, { type: "chatReply", error: missing ? "Claude Code CLI not found. Install Claude Code and run `claude` once to sign in; if it is installed, restart VS Code or set codeFlow.claudePath to its full path." : String((e && e.message) || e) });
   } finally {
     if (st.chat) st.chat.child = null;
   }

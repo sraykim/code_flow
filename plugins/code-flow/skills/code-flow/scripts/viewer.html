@@ -1668,16 +1668,20 @@ function mdLite(text) {
   const blk = (id) => `<a class="blk" data-go="${id}">${id}</a>`;
   const lineLnk = (label, a, b) => `<a class="blk" data-line="${a}${b ? "-" + b : ""}">${label}</a>`;
   const inline = (t) => {
+    // Code spans, links and bold are swapped for private-use placeholders (U+E000 n U+E001) while the
+    // other patterns run, then restored. If anything mangles the placeholders, fall back to escaped text.
     const hold = [];
-    const keep = (html) => { hold.push(html); return `\u0000${hold.length - 1}\u0000`; };
-    let h = esc(t).replace(/`([^`\n]+)`/g, (m, c) => {
+    const keep = (html) => { hold.push(html); return `\uE000${hold.length - 1}\uE001`; };
+    const raw = esc(t.replace(/\r/g, ""));
+    let h = raw.replace(/`([^`\n]+)`/g, (m, c) => {
       const mm = c.match(/^L?(\d+)(?:\s*[–-]\s*L?(\d+))?$/);
       return keep(ids.has(c) ? blk(c) : mm ? lineLnk(c, mm[1], mm[2]) : `<code>${c}</code>`);
     });
     h = h.replace(/\*\*([^*]+)\*\*/g, (m, b) => keep(`<b>${b}</b>`));
     h = h.replace(/\b(lines? )(\d+)(?:\s*[–-]\s*(\d+))?/gi, (m, w, a, b) => keep(lineLnk(m, a, b)));
     h = h.replace(/\b((?:[A-Za-z_][\w.]*\/)?(?:[nhb]\d+|out|c\d+)(?:\.sql\/(?:c\d+|out|in))?)\b/g, (m) => (ids.has(m) ? keep(blk(m)) : m));
-    return h.replace(/\u0000(\d+)\u0000/g, (m, i) => hold[+i]);
+    const out = h.replace(/\uE000(\d+)\uE001/g, (m, i) => hold[+i] || "");
+    return /[\uE000\uE001]/.test(out) ? raw : out;
   };
   const parts = text.split(/```\w*\n?/); let h = "";
   parts.forEach((part, i) => {
