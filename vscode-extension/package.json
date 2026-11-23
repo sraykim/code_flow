@@ -2,7 +2,7 @@
   "name": "code-flow",
   "displayName": "Code Flow",
   "description": "See a Python script, notebook or SQL file as a map of code blocks linked by the variables and tables they pass \u2014 including the project's own modules and the CTEs inside queries. Chat with Claude Code about it, follow the debugger, export as HTML.",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "publisher": "rayk",
   "license": "MIT",
   "engines": {
@@ -52,14 +52,14 @@
       "editor/title": [
         {
           "command": "codeFlow.open",
-          "when": "resourceLangId == python || resourceLangId == sql",
+          "when": "resourceLangId == python || resourceLangId == sql || resourceExtname == .ipynb",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "codeFlow.open",
-          "when": "resourceLangId == python || resourceLangId == sql",
+          "when": "resourceLangId == python || resourceLangId == sql || resourceExtname == .ipynb",
           "group": "navigation@90"
         }
       ],
@@ -101,7 +101,7 @@
       "notebook/toolbar": [
         {
           "command": "codeFlow.open",
-          "when": "notebookType == jupyter-notebook",
+          "when": "notebookType == jupyter-notebook || resourceExtname == .ipynb",
           "group": "navigation"
         }
       ]

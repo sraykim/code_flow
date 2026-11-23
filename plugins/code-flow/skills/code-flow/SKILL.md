@@ -30,8 +30,9 @@ Three things the parser does that matter for reading the map:
   blocks marked). Flows nest, so a function called inside an opened function
   can be opened too. Blocks inside an opened flow start with their code folded.
 
-Scope: one `.py` file, Python only. No notebooks, no following imports into
-other files.
+Scope: a `.py` script, a Jupyter notebook (`.ipynb`) or a `.sql` file. The
+parser also reads the functions the script imports from the project's own
+modules, and the SQL inside strings and `.sql` files (see step 1).
 
 The scripts live in the `scripts/` folder of this skill's directory. Below,
 `SKILL_DIR` means that directory.

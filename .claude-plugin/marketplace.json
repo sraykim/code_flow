@@ -1,13 +1,13 @@
 {
   "name": "code-flow",
-  "description": "Code Flow: read a Python script as an interactive dataflow map with a plain-English walkthrough",
+  "description": "Code Flow: read a Python script, notebook or SQL file as an interactive dataflow map with Claude's notes",
   "owner": { "name": "Seung Rae Kim (sraykim)" },
   "plugins": [
     {
       "name": "code-flow",
       "source": "./plugins/code-flow",
-      "description": "Map a Python script: sections → blocks → function flows, branches as forks, Claude's notes and a step-by-step Read page",
-      "version": "0.9.4"
+      "description": "Map a Python script, notebook or SQL file: sections → blocks → function flows and CTE flows, imports followed, Claude's notes",
+      "version": "0.9.5"
     }
   ]
 }
