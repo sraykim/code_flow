@@ -7,7 +7,7 @@
       "name": "code-flow",
       "source": "./plugins/code-flow",
       "description": "Map a Python script, notebook or SQL file: sections → blocks → function flows and CTE flows, imports followed, Claude's notes",
-      "version": "0.9.5"
+      "version": "0.9.6"
     }
   ]
 }

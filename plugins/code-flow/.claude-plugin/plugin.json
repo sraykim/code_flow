@@ -1,7 +1,7 @@
 {
   "name": "code-flow",
   "description": "Turn a Python script, Jupyter notebook or SQL file into an interactive dataflow map with Claude's notes. Use /code-flow:code-flow <file>.",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "author": { "name": "Seung Rae Kim" },
   "homepage": "https://github.com/sraykim/code_flow",
   "repository": "https://github.com/sraykim/code_flow",

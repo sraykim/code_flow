@@ -992,6 +992,7 @@ function buildAll() {
       const cells = nb.out_of_order.map((n) => { const c = nb.cells.find((x) => x.n === n); return c && c.exec != null ? `cell ${n} (In [${c.exec}])` : `cell ${n}`; });
       warns.push(`cells ran out of document order: ${cells.join(", ")} — the map follows document order`);
     }
+    for (const b of nb.bad_cells || []) warns.push(`code cell ${b.n} is not valid Python and was skipped: ${esc(b.error)}`);
     for (const f of nb.forward_refs) warns.push(`<a data-go="${f.node}">${esc(f.var)}</a> is read in cell ${f.cell} but defined in cell ${f.defined_cell}: fails on Restart &amp; Run All`);
   }
   $("ov-warn").innerHTML = warns.map((w) => "⚠ " + w).join("<br>");

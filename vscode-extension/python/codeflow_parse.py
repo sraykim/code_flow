@@ -338,20 +338,52 @@ NB_SQL_MAGICS = {"sql", "bigquery", "spark", "sparksql", "snowflake", "duckdb", 
                  "clickhouse", "mysql", "postgres", "postgresql", "sqlite", "redshift", "teradata", "synapse"}
 
 
+def _magic_target(head: str, words: list) -> str:
+    """The variable a SQL cell magic stores its result in: `%%bigquery df`, `%%sql df <<`,
+    `--output '{"dataframe_name": "df"}'` (SageMaker), `-o df` / `--output df` (ipython-sql)."""
+    m = re.search(r"dataframe_name\W+([A-Za-z_]\w*)", head)
+    if m:
+        return m.group(1)
+    m = re.search(r"(?:^|\s)(?:-o|--output)\s+([A-Za-z_]\w*)(?:\s|$)", head)
+    if m:
+        return m.group(1)
+    for w in words[1:]:
+        if w.startswith("-"):
+            continue
+        if re.fullmatch(r"[A-Za-z_]\w*", w):
+            return w
+        break
+    return "_sql_result"
+
+
 def _clean_ipython(body):
     """Comment out magics, shell escapes and `obj?` help lines, keeping line count and indentation.
-    A %%sql-style cell becomes `result = r'''<query>'''` so the SQL is found like any other string."""
+    A cell magic whose body is SQL (%%sql, %%bigquery, %%sm_sql, ...) becomes `result = r'''<query>'''`
+    so the SQL is found like any other string; any other non-Python cell magic is commented out whole."""
     foreign = False
     if body and body[0].lstrip().startswith("%%"):
-        words = body[0].lstrip()[2:].split()
-        if words and words[0].lower() in NB_SQL_MAGICS:
-            target = next((w for w in words[1:] if re.fullmatch(r"[A-Za-z_]\w*", w)), None) or "_sql_result"
-            q = "'''" if "'''" not in "\n".join(body) else '"""'
-            rest = body[1:]
+        head = body[0].strip()
+        words = head[2:].split()
+        name = words[0].lower() if words else ""
+        rest = body[1:]
+        body_text = "\n".join(rest)
+        if name in NB_SQL_MAGICS or "sql" in name or (name not in NB_FOREIGN_MAGICS and is_sql_text(body_text)):
+            target = _magic_target(head, words)
+            q = "'''" if "'''" not in body_text else '"""'
             if not rest:
-                return [f"{target} = {q}{q}  #> {body[0].strip()}"]
-            return [f"{target} = r{q}  #> {body[0].strip()}"] + rest[:-1] + [rest[-1].rstrip("\n") + q]
-        foreign = bool(words) and words[0] in NB_FOREIGN_MAGICS
+                return [f"{target} = {q}{q}  #> {head}"]
+            return [f"{target} = r{q}  #> {head}"] + [l.rstrip("\n") for l in rest[:-1]] + [rest[-1].rstrip("\n") + q]
+        if name in NB_FOREIGN_MAGICS:
+            foreign = True
+        elif name not in ("time", "timeit", "capture", "prun", "memit", "writefile_py") and rest:
+            try:                      # unknown cell magic: keep it only if its body is valid Python
+                ast.parse("\n".join(_clean_ipython_lines(rest)))
+            except SyntaxError:
+                foreign = True
+    return _clean_ipython_lines(body, foreign)
+
+
+def _clean_ipython_lines(body, foreign=False):
     out = []
     for line in body:
         stripped = line.lstrip()
@@ -421,7 +453,7 @@ def load_notebook(path: str):
     nb = json.loads(Path(path).read_text(encoding="utf-8"))
     cells, lines, heading, md_buf = [], [], None, []
     budget = {"images": NB_IMAGE_BUDGET}
-    exec_max, out_of_order, n, doc = 0, [], 0, ""
+    exec_max, out_of_order, n, doc, bad_cells = 0, [], 0, "", []
     for idx, c in enumerate(nb.get("cells") or []):
         src = _nb_text(c.get("source"))
         kind = c.get("cell_type")
@@ -444,7 +476,13 @@ def load_notebook(path: str):
             lines.append(f"# --- {heading} ---")
             heading = None
         code_start = len(lines) + 1
-        lines.extend(_clean_ipython(src.splitlines()))
+        cleaned = _clean_ipython(src.splitlines())
+        try:
+            ast.parse("\n".join(cleaned))
+        except SyntaxError as e:
+            bad_cells.append({"n": n, "index": idx, "error": f"{e.msg} (line {e.lineno} of the cell)"})
+            cleaned = _clean_ipython_lines(src.splitlines(), foreign=True)
+        lines.extend(cleaned)
         end = len(lines)
         lines.append("")
         if isinstance(ec, int):
@@ -456,7 +494,7 @@ def load_notebook(path: str):
                       "md": " ".join(md_buf)[:400], "outputs": _collect_outputs(c, budget)})
         md_buf = []
     source = "\n".join(lines) + "\n"
-    return source, {"cells": cells, "code_cells": n, "out_of_order": out_of_order, "doc": doc}
+    return source, {"cells": cells, "code_cells": n, "out_of_order": out_of_order, "doc": doc, "bad_cells": bad_cells}
 
 
 def cell_of(nbinfo: dict, line: int):
@@ -1856,7 +1894,8 @@ class GraphBuilder:
                     self.add_edge(w["id"], nd["id"], r, "forward")
             written.update(nd.get("writes") or [])
         cells = [{k: v for k, v in c.items() if k != "outputs"} | {"has_output": bool(c["outputs"])} for c in nb["cells"]]
-        return {"cells": cells, "code_cells": nb["code_cells"], "out_of_order": nb["out_of_order"], "forward_refs": forward}
+        return {"cells": cells, "code_cells": nb["code_cells"], "out_of_order": nb["out_of_order"], "forward_refs": forward,
+                "bad_cells": nb.get("bad_cells", [])}
 
 
 def load_source(path: str) -> tuple[str, dict | None]:
@@ -1884,6 +1923,8 @@ def brief(graph: dict) -> str:
         out.append(f"NOTEBOOK: {nb['code_cells']} code cells read in document order; line numbers are of the flattened notebook, 'cell [k]' is the cell's execution count")
         if nb["out_of_order"]:
             out.append(f"  WARNING run order differs from document order at code cells {nb['out_of_order']}")
+        for b in nb.get("bad_cells", []):
+            out.append(f"  WARNING code cell {b['n']} is not valid Python and was skipped: {b['error']}")
         for f in nb["forward_refs"]:
             out.append(f"  WARNING {f['var']} is read in {f['node']} (code cell {f['cell']}) but only defined later in {f['defined_in']} (code cell {f['defined_cell']}): works in a live kernel, breaks on Restart & Run All")
     if graph.get("modules"):
